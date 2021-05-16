@@ -10,3 +10,4 @@
 | 浏览器                       | History Server    | 18080    | Web UI             | spark.history.ui.port   | Jetty Based.                       |
 | Executor / Standalone Master | Driver            | 随机     |                    |                         | 设为`0`是随机选择一个端口          |
 | Executor / Driver            | Executor / Driver | 随机     | Block Manager port | spark.blockManager.port | Raw socket via ServerSocketChannel |
+
