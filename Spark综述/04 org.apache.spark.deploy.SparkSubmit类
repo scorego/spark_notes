@@ -1,12 +1,42 @@
 > 使用spark-submit脚本提交Spark作业时最终会来到`org.apache.spark.deploy.SparkSubmit`类，该类负责提交作业、查询状态等操作。那么具体流程是什么呢？
+>
+> 还以上篇中的脚本命令为例说明：
+>
+> ```bash
+> spark-submit脚本命令：
+> ./bin/spark-submit \
+>   --class com.example.WordCount \
+>   --master spark://127.0.0.1:7077 \
+>   --deploy-mode cluster \
+>   --executor-memory 4G \
+>   ./user-jar-0.1.1.jar \
+>   arg1 \
+>   arg2
+>  
+> 实际上相当于调用spark-class脚本并执行命令：
+> java -Xmx128m -cp ...jars org.apache.spark.launcher.Main \
+>           org.apache.spark.deploy.SparkSubmit \
+>           --class com.example.WordCount \
+>           --master spark://127.0.0.1:7077 \
+>           --deploy-mode cluster \
+>           --executor-memory 4G \
+>           ./user-jar-0.1.1.jar \
+>          arg1 \
+>          arg2
+> 
+> 最终执行的命令是：
+> java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit --master spark://127.0.0.1:7077 --deploy-mode cluster --class com.example.WordCount --executor-memory 4G ./user-jar-0.1.1.jar arg1 arg2
+> ```
+>
+> 
 
+---
 
-
-`org.apache.spark.deploy.SparkSubmit`的`main`方法主要是新建了一个`SparkSubmit`类实例，并在此实例上调用`doSubmit`方法。`org.apache.spark.deploy.SparkSubmit`类定义如下：
+`org.apache.spark.deploy.SparkSubmit`类定义如下：
 
 ```scala
 /**
- * Main gateway of launching a Spark application.
+ * Main gateway of launching a Spark application. 该类是启动Spark应用程序的主要入口。
  *
  * This program handles setting up the classpath with relevant Spark dependencies and provides
  * a layer over the different cluster managers and deploy modes that Spark supports.
@@ -16,7 +46,7 @@ private[spark] class SparkSubmit extends Logging  {...}
 object SparkSubmit extends CommandLineUtils with Logging {...}
 ```
 
-`SparkSubmit`类继承了`CommandLineUtils`类，后者实现了`CommandLineLoggingUtils`特质，从而有了`exitFn`方法。`exitFn`的逻辑就是退出程序。
+可以看到，`SparkSubmit`类继承了`CommandLineUtils`类，后者实现了`CommandLineLoggingUtils`特质，从而有了`exitFn`方法。`exitFn`的逻辑就是按一定的退出码退出程序。
 
 ```scala
 /**
@@ -44,19 +74,59 @@ private[spark] trait CommandLineLoggingUtils {
 }
 ```
 
+# 一、 入口：`main()`方法
 
+`org.apache.spark.deploy.SparkSubmit`类是启动Spark应用程序的主要入口，`main`方法如下：
 
-# 一、doSubmit
+```scala
+override def main(args: Array[String]): Unit = {
+    // 1. 新建一个SparkSubmit类实例
+    val submit = new SparkSubmit() {
+        self =>
 
-`main`方法新建`SparkSubmit`实例时override了`doSubmit`/`parseArguments`等方法，重写`parseArguments`主要和日志打印有关，而重写`doSubmit`方法主要是多了捕捉异常并退出程序这一步骤。
+        override protected def parseArguments(args: Array[String]): SparkSubmitArguments = {
+            new SparkSubmitArguments(args) {
+                override protected def logInfo(msg: => String): Unit = self.logInfo(msg)
+
+                override protected def logWarning(msg: => String): Unit = self.logWarning(msg)
+
+                override protected def logError(msg: => String): Unit = self.logError(msg)
+            }
+        }
+
+        override protected def logInfo(msg: => String): Unit = printMessage(msg)
+
+        override protected def logWarning(msg: => String): Unit = printMessage(s"Warning: $msg")
+
+        override protected def logError(msg: => String): Unit = printMessage(s"Error: $msg")
+
+        override def doSubmit(args: Array[String]): Unit = {
+            try {
+                super.doSubmit(args)
+            } catch {
+                case e: SparkUserAppException =>
+                exitFn(e.exitCode)
+            }
+        }
+    }
+
+    // 2. 调用该实例的doSubmit方法
+    submit.doSubmit(args)
+}
+```
+
+可以看到，`main`方法就是新建了`org.apache.spark.deploy.SparkSubmit.SparkSubmit`类(自己)的实例，然后在实例上调用`doSubmit`方法。
+
+# 二、`doSubmit()`
+
+`main()`方法新建`SparkSubmit`实例时重写了`doSubmit()`/`parseArguments()`等方法，重写`parseArguments`主要和日志打印有关，而重写`doSubmit`方法主要是多了捕捉异常并退出程序这一步骤。
 
 ```scala
 override def doSubmit(args: Array[String]): Unit = {
   try {
     super.doSubmit(args)
   } catch {
-    case e: SparkUserAppException =>
-      exitFn(e.exitCode)
+    case e: SparkUserAppException => exitFn(e.exitCode)
   }
 }
 ```
@@ -163,8 +233,8 @@ private def initializeLogging(isInterpreter: Boolean, silent: Boolean): Unit = {
 
 ```scala
 val appArgs = parseArguments(args)
-	if (appArgs.verbose) {
-    	logInfo(appArgs.toString)
+if (appArgs.verbose) {
+    logInfo(appArgs.toString)
 }
 ```
 
@@ -180,15 +250,13 @@ java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit --maste
   override protected def parseArguments(args: Array[String]): SparkSubmitArguments = {
         new SparkSubmitArguments(args) {
           override protected def logInfo(msg: => String): Unit = self.logInfo(msg)
-
           override protected def logWarning(msg: => String): Unit = self.logWarning(msg)
-
           override protected def logError(msg: => String): Unit = self.logError(msg)
         }
   }
 ```
 
-`org.apache.spark.deploy.SparkSubmitArguments`类继承了`s`类，并调用`parse`方法来解析参数：
+`org.apache.spark.deploy.SparkSubmitArguments`类继承了`org.apache.spark.launcher.SparkSubmitArgumentsParser`类，并调用`parse`方法来解析参数：
 
 ```scala
 /**
@@ -203,11 +271,11 @@ private[deploy] class SparkSubmitArguments(args: Seq[String], env: Map[String, S
   // 解析参数
   parse(args.asJava)
 
-  // Populate `sparkProperties` map from properties file
+  // 从properties file中填充`sparkProperties`所含的键值对映射
   mergeDefaultSparkProperties()
-  // 从 `sparkProperties`中移除不以`spark.`开头的key
+  // 从`sparkProperties`中移除不以`spark.`开头的key
   ignoreNonSparkProperties()
-  // Use `sparkProperties` map along with env vars to fill in any missing parameters
+  // 使用`sparkProperties`和env变量来填充任何缺少的参数
   loadEnvironmentArguments()
 
   useRest = sparkProperties.getOrElse("spark.master.rest.enabled", "false").toBoolean
@@ -216,6 +284,8 @@ private[deploy] class SparkSubmitArguments(args: Seq[String], env: Map[String, S
   validateArguments()
 }
 ```
+
+`parse()`解析的参数会把对应的值赋给类的实例变量，且第一个无法识别的参数会被认定为`primaryResource: String`变量，之后的变量被认定为应用程序的参数添加到`childArgs: ArrayBuffer[String]`中。
 
 ## 3. 执行动作
 
@@ -239,13 +309,13 @@ private[deploy] object SparkSubmitAction extends Enumeration {
 }
 ```
 
-如果是提交作业，则会匹配到`submit`方法；如果是kill作业，则会匹配到`kill`方法；`requestStatus`和`PRINT_VERSION`则只能在standalone和Mesos模式使用。
+如果是提交作业，则会匹配到`submit()`方法；如果是kill作业，则会匹配到`kill()`方法；`requestStatus()`和`PRINT_VERSION()`则只能在standalone和Mesos模式使用。
 
 # 二、submit方法
 
-`submit()`方法是提交Spark作业，其实主要就是调用`runMain()`方法。`runMain()`使用参数来运行子类(子类就是脚本最终解析的命令中用`--class`指定的类)的main方法，共两步：
+`submit()`方法是提交Spark作业，其实主要就是调用`runMain()`方法。`runMain()`使用参数来运行子类(子类就是脚本最终解析的命令中用`--class`指定的类)的`main()`方法，共两步：
 
-1. 根据不同的cluster manager和deploy mode来准备启动环境，诸如classpath、系统变量、application 参数
+1. 根据不同的cluster manager和deploy mode来准备启动环境，诸如classpath、系统变量、application参数
 2. 使用该启动环境来调用子类的main方法
 
 ```scala
@@ -1027,7 +1097,7 @@ private[deploy] object SparkSubmitAction extends Enumeration {
 
 ## 2. 启动应用程序
 
-如果是client模式，启动的是`JavaMainApplication`但是如果是yarn cluster模式，它创建的实例是不同的，也就是start()启动的类其实是`YarnClusterApplication`，同样继承了`SparkApplication`。
+如果是client模式，启动的是`JavaMainApplication`；但是如果是yarn cluster模式，它创建的实例是不同的，启动的类其实是`YarnClusterApplication`，同样继承了`SparkApplication`。
 
 ```scala
   // 通过classOf[]构建从属于mainClass的SparkApplication对象,然后通过mainclass实例化了SparkApplication
@@ -1076,7 +1146,7 @@ private[deploy] object SparkSubmitAction extends Enumeration {
  * Configuration is propagated to the application via system properties, so running multiple
  * of these in the same JVM may lead to undefined behavior due to configuration leaks.
  *
- * 用main方法包装标准java类的SparkApplication实现。配置是通过系统配置文件传递的,所以在同一个JVM中加载多个该类会可能导致配置泄露
+ * 用main方法包装标准java类的SparkApplication实现。配置是通过系统属性传递的,所以在同一个JVM中加载多个该类会可能导致配置泄露
  */
 private[deploy] class JavaMainApplication(klass: Class[_]) extends SparkApplication {
 
