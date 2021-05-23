@@ -96,4 +96,3 @@ object WordCount {
 }
 ```
 
-可以看到，代码的核心指出是初始化`SparkSession`实例。
