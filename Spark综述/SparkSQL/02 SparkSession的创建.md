@@ -1,3 +1,11 @@
+Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本，`sparkContext`是进入Spark的切入点。RDD的创建和操作得使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`sqlContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐称为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
+
+Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的组合，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。
+
+其次`SparkSession`通过工厂设计模式（factory design pattern）实现，如果没有创建`SparkSession`对象，则会实例化出一个新的`SparkSession`对象及其相关的上下文。
+
+# 一、 SparkSession
+
 ```scala
 package org.apache.spark.sql
 
@@ -23,18 +31,62 @@ class SparkSession private(
 object SparkSession extends Logging{...}
 ```
 
-Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本，`sparkContext`是进入Spark的切入点。RDD的创建和操作得使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`sqlContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐称为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
+## 1. 属性
 
-Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的组合，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。
+`SparkSession`有以下重要属性：
 
-其次`SparkSession`通过工厂设计模式（factory design pattern）实现，如果没有创建`SparkSession`对象，则会实例化出一个新的`SparkSession`对象及其相关的上下文。
+实例属性：
 
-# 一、 SparkSession.Builder
+```scala
+
+private val creationSite: CallSite = Utils.getCallSite()
+
+// 在多个SparkSession之间共享的状态，包括SparkContext、缓存的数据、监听器(listener)、与外部系统交互的catalog
+lazy val sharedState: SharedState = {
+    existingSharedState.getOrElse(new SharedState(sparkContext, initialSessionOptions))
+}
+
+// session之间隔离的状态，包括SQL配置、临时表、注册的函数，and everything else that accepts a [[org.apache.spark.sql.internal.SQLConf]]
+// 如果`parentSessionState`不是null，则该变量会是`parentSessionState`的克隆
+lazy val sessionState: SessionState = {
+    parentSessionState
+    .map(_.clone(this))
+    .getOrElse {
+        val state = SparkSession.instantiateSessionState(
+            SparkSession.sessionStateClassName(sparkContext.conf),
+            self,
+            initialSessionOptions)
+        state
+    }
+}
+
+// 即SQLContext，SparkSQL的上下文信息
+val sqlContext: SQLContext = new SQLContext(this)
+
+// Spark的运行时配置
+lazy val conf: RuntimeConfig = new RuntimeConfig(sessionState.conf)
+
+lazy val catalog: Catalog = new CatalogImpl(self)
+```
+
+伴生对象的属性：
+
+```scala
+// 持有当前线程激活的SparkSession
+private val activeThreadSession = new InheritableThreadLocal[SparkSession]
+
+// 持有默认的SparkSession
+private val defaultSession = new AtomicReference[SparkSession]
+```
+
+
+
+# 二、 SparkSession.Builder
 
 ```scala
 /**
-   * Builder for [[SparkSession]].
-   */
+  * Builder for [[SparkSession]].
+  */
 @Stable
 class Builder extends Logging {
 
@@ -135,7 +187,7 @@ class Builder extends Logging {
 
 - `private[this] val options = new scala.collection.mutable.HashMap[String, String]`
 
-  用来存放`SparkConf`。
+  用来存放构件`SparkConf`所需要的配置。
 
 - `private[this] val extensions = new SparkSessionExtensions`
 
@@ -189,7 +241,7 @@ class Builder extends Logging {
 
 - `private[this] var userSuppliedContext: Option[SparkContext] = None`
 
-  用来存放用户提供的`SparkContext`，有可能用户自己先实例化了一个`SparkContext`，可以通过 这个类的`sparkContext()`方法（这个方法只限在spark内部使用）暂时保存 用户的`sparkContext`，最后在这个类的`getOrCreate()`方法中 进行兼容处理。
+  用来存放用户提供的`SparkContext`。有可能用户自己先实例化了一个`SparkContext`，可以通过 这个类的`sparkContext()`方法（这个方法只限在spark内部使用）暂时保存 用户的`sparkContext`，最后在这个类的`getOrCreate()`方法中 进行兼容处理。
 
 
 
@@ -268,9 +320,22 @@ def getOrCreate(): SparkSession = synchronized {
 }
 ```
 
+总的来说:
 
+1. 用`options`中的键值对创建一个`SparkConf`。
+2. 根据配置`spark.executor.allowSparkContext`来判定当前是否是driver在新建`SparkSession`。如果配置不允许executor创建`SparkContext`，则在executor上调用此方法会抛异常。
+3. 如果从`activeThreadSession`(`ThreadLocal`)中能获取到激活且还未停止的`SparkSession`，那么将`options`中的键值对设置到该`SparkSession`的`sessionState`的`SQLConf`中并**返回**此`SparkSession`。
+4. 如果存在默认且还未停止的`SparkSession`(`defaultSession`)，那么将`options`中的键值对设置到该`SparkSession`的`sessionState`的`SQLConf`中并**返回**此`SparkSession`。
+5. 如果用户提供了`SparkContext`(存放在`userSuppliedContext`中)，则使用该`SparkContext`，否则会创建一个`SparkContext`。创建顺序如下：
+   1. 当未指定`spark.app.name`配置时，会使用UUID来生成随机的名字；
+   2. 调用`SparkContext`伴生对象的`getOrCreate()`方法获取或创建`SparkContext`。
+6. 应用`SparkSessionExtensions`
+7. 使用`SparkContext`、`SparkSessionExtensions`、`options`创建`SparkSession`。
+8. 将创建的`SparkSession`设置到`activeThreadSession`和`defaultSession`中。
+9. 调用该`SparkContext`的`addSparkListener()`方法，向`listenerBus`中添加匿名实现的`SparkListener`（此`SparkListener`的作用是在Application结束后清空`defaultSession`和`listenerRegistered`）。
+10. 返回创建或获取的`SparkSession`。
 
-# 二、SparkConf
+# 三、SparkConf
 
 在上面的`SparkSession.builder().getOrCreate()`方法中，会首先创建一个`SparkConf`实例。`SparkConf`是Spark的配置类，内部通过`ConcurrentHashMap[String, String]`来存储spark的配置。
 
@@ -304,9 +369,9 @@ class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Seria
 private[spark] object SparkConf extends Logging {...}
 ```
 
-如何获取SparkConf配置：
+`SparkConf`的配置有哪些途径获取呢？有以下三种：
 
-- 来源于系统参数(即`System.getpropertie`s获取的属性)中以`spark.`作为前缀的属性
+- 来源于系统参数(即`System.getpropertie`s获取的属性)中以`spark.`作为前缀的属性。这一步是构建`SparkConf`实例的时候进行的。
 
   ```scala
   // import语句是从SparkConf类的伴生对象中导入一些东西，它们主要管理过期的、旧版本兼容的配置项，以及日志输出。
@@ -331,7 +396,7 @@ private[spark] object SparkConf extends Logging {...}
 
   
 
-- 使用SparkConf的API进行设置
+- 使用`SparkConf`的API（`set()`方法）进行设置
 
   ```scala
   /** Set a configuration variable. */
@@ -401,26 +466,5 @@ private[spark] object SparkConf extends Logging {...}
 # 三、 SparkContext
 
 `SparkSession.builder().getOrCreate()`方法在创建完`SparkConf`后，如果是第一次创建`SparkSession`，会使用`SparkContext.getOrCreate(sparkConf)`来创建`SparkContext`实例。
-
-```scala
-package org.apache.spark
-
-/**
- * Main entry point for Spark functionality. A SparkContext represents the connection to a Spark
- * cluster, and can be used to create RDDs, accumulators and broadcast variables on that cluster.
- *
- * @note Only one `SparkContext` should be active per JVM. You must `stop()` the
- *   active `SparkContext` before creating a new one.
- * @param config a Spark Config object describing the application configuration. Any settings in
- *   this config overrides the default configs as well as system properties.
- */
-class SparkContext(config: SparkConf) extends Logging {...}
-
-/**
- * The SparkContext object contains a number of implicit conversions and parameters for use with
- * various Spark features.
- */
-object SparkContext extends Logging {...}
-```
 
 `SparkContext`初始化很复杂，所以单独整理在下一节。
