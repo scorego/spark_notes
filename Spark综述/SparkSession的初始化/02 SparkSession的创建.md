@@ -514,5 +514,8 @@ class SparkSession private(
     lazy val conf: RuntimeConfig = new RuntimeConfig(sessionState.conf)
     
     lazy val catalog: Catalog = new CatalogImpl(self)
+
+	...  
+}
 ```
 
