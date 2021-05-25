@@ -1,4 +1,6 @@
-Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本，`sparkContext`是进入Spark的切入点。RDD的创建和操作得使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`sqlContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐称为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
+> Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本，`sparkContext`是进入Spark的切入点。RDD的创建和操作得使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`sqlContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐称为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
+
+
 
 Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的组合，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。
 
@@ -38,9 +40,6 @@ object SparkSession extends Logging{...}
 实例属性：
 
 ```scala
-
-private val creationSite: CallSite = Utils.getCallSite()
-
 // 在多个SparkSession之间共享的状态，包括SparkContext、缓存的数据、监听器(listener)、与外部系统交互的catalog
 lazy val sharedState: SharedState = {
     existingSharedState.getOrElse(new SharedState(sparkContext, initialSessionOptions))
@@ -129,8 +128,7 @@ class Builder extends Logging {
         if (hiveClassesArePresent) {
             config(CATALOG_IMPLEMENTATION.key, "hive")
         } else {
-            throw new IllegalArgumentException(
-                "Unable to instantiate SparkSession with Hive support because Hive classes are not found.")
+            throw new IllegalArgumentException("Unable to instantiate SparkSession with Hive support because Hive classes are not found.")
         }
     }
 
@@ -166,18 +164,13 @@ class Builder extends Logging {
 	
     //
     private def applyModifiableSettings(session: SparkSession): Unit = {
-        val (staticConfs, otherConfs) =
-        options.partition(kv => SQLConf.staticConfKeys.contains(kv._1))
-
+        val (staticConfs, otherConfs) = options.partition(kv => SQLConf.staticConfKeys.contains(kv._1))
         otherConfs.foreach { case (k, v) => session.sessionState.conf.setConfString(k, v) }
-
         if (staticConfs.nonEmpty) {
-            logWarning("Using an existing SparkSession; the static sql configurations will not take" +
-                       " effect.")
+            logWarning("Using an existing SparkSession; the static sql configurations will not take effect.")
         }
         if (otherConfs.nonEmpty) {
-            logWarning("Using an existing SparkSession; some spark core configurations may not take" +
-                       " effect.")
+            logWarning("Using an existing SparkSession; some spark core configurations may not take effect.")
         }
     }
 }
@@ -245,7 +238,7 @@ class Builder extends Logging {
 
 
 
-## getOrCreate()
+## 1. getOrCreate()
 
 `getOrCreate()`方法十分重要，代码如下：
 
@@ -468,3 +461,58 @@ private[spark] object SparkConf extends Logging {...}
 `SparkSession.builder().getOrCreate()`方法在创建完`SparkConf`后，如果是第一次创建`SparkSession`，会使用`SparkContext.getOrCreate(sparkConf)`来创建`SparkContext`实例。
 
 `SparkContext`初始化很复杂，所以单独整理在下一节。
+
+# 四、 `SparkSession`实例化过程
+
+`getOrCreate()`方法在获取到`SparkContext`后会新建`SparkSession`实例：
+
+```scala
+session = new SparkSession(sparkContext, None, None, extensions, options.toMap)
+```
+
+`SparkSession`构造过程如下：
+
+```scala
+@Stable
+class SparkSession private(
+    @transient val sparkContext: SparkContext,
+    @transient private val existingSharedState: Option[SharedState],
+    @transient private val parentSessionState: Option[SessionState],
+    @transient private[sql] val extensions: SparkSessionExtensions,
+    @transient private[sql] val initialSessionOptions: Map[String, String])
+  extends Serializable with Closeable with Logging {  self =>
+      
+      
+    private[sql] val sessionUUID: String = UUID.randomUUID.toString
+      
+    sparkContext.assertNotStopped()
+
+    // If there is no active SparkSession, uses the default SQL conf. Otherwise, use the session's.
+    SQLConf.setSQLConfGetter(() => {
+        SparkSession.getActiveSession.filterNot(_.sparkContext.isStopped)
+        	.map(_.sessionState.conf)
+          	.getOrElse(SQLConf.getFallbackConf)
+    })
+      
+    lazy val sharedState: SharedState = {
+    	existingSharedState.getOrElse(new SharedState(sparkContext, initialSessionOptions))
+  	}
+      
+    lazy val sessionState: SessionState = {
+        parentSessionState.map(_.clone(this))
+          .getOrElse {
+                val state = SparkSession.instantiateSessionState(
+                      SparkSession.sessionStateClassName(sparkContext.conf),
+                      self,
+                      initialSessionOptions)
+                state
+          }
+    }
+      
+    val sqlContext: SQLContext = new SQLContext(this)
+      
+    lazy val conf: RuntimeConfig = new RuntimeConfig(sessionState.conf)
+    
+    lazy val catalog: Catalog = new CatalogImpl(self)
+```
+
