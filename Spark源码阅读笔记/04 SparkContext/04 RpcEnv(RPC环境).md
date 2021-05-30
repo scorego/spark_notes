@@ -45,35 +45,33 @@ package org.apache.spark.rpc
  */
 private[spark] object RpcEnv {
 
-  def create(
-      name: String,
-      host: String,
-      port: Int,
-      conf: SparkConf,
-      securityManager: SecurityManager,
-      clientMode: Boolean = false): RpcEnv = {
-    create(name, host, host, port, conf, securityManager, 0, clientMode)
-  }
+    def create(name: String,
+               host: String,
+               port: Int,
+               conf: SparkConf,
+               securityManager: SecurityManager,
+               clientMode: Boolean = false): RpcEnv = {
+        create(name, host, host, port, conf, securityManager, 0, clientMode)
+    }
 
-  def create(
-      name: String,
-      bindAddress: String,
-      advertiseAddress: String,
-      port: Int,
-      conf: SparkConf,
-      securityManager: SecurityManager,
-      numUsableCores: Int,
-      clientMode: Boolean): RpcEnv = {
-    val config = RpcEnvConfig(conf, 
-                              name, 
-                              bindAddress, 
-                              advertiseAddress, 
-                              port, 
-                              securityManager,
-                              umUsableCores, 
-                              clientMode)
-    new NettyRpcEnvFactory().create(config)
-  }
+    def create(name: String,
+               bindAddress: String,
+               advertiseAddress: String,
+               port: Int,
+               conf: SparkConf,
+               securityManager: SecurityManager,
+               numUsableCores: Int,
+               clientMode: Boolean): RpcEnv = {
+        val config = RpcEnvConfig(conf, 
+                                  name, 
+                                  bindAddress, 
+                                  advertiseAddress, 
+                                  port, 
+                                  securityManager,
+                                  umUsableCores, 
+                                  clientMode)
+        new NettyRpcEnvFactory().create(config)
+    }
 }
 
 
@@ -87,35 +85,35 @@ private[spark] object RpcEnv {
  * [[RpcEnv]] also provides some methods to retrieve [[RpcEndpointRef]]s given name or uri.
  */
 private[spark] abstract class RpcEnv(conf: SparkConf) {
-    
-  private[spark] val defaultLookupTimeout = RpcUtils.lookupRpcTimeout(conf)
-  
-  private[rpc] def endpointRef(endpoint: RpcEndpoint): RpcEndpointRef
-    
-  def address: RpcAddress
-    
-  def setupEndpoint(name: String, endpoint: RpcEndpoint): RpcEndpointRef
-    
-  def asyncSetupEndpointRefByURI(uri: String): Future[RpcEndpointRef]
-    
-  def setupEndpointRefByURI(uri: String): RpcEndpointRef = { defaultLookupTimeout.awaitResult(asyncSetupEndpointRefByURI(uri))}
-    
-  
-  def setupEndpointRef(address: RpcAddress, endpointName: String): RpcEndpointRef = {
-    setupEndpointRefByURI(RpcEndpointAddress(address, endpointName).toString)
-  }
-    
-  def stop(endpoint: RpcEndpointRef): Unit
 
-  def shutdown(): Unit
+    private[spark] val defaultLookupTimeout = RpcUtils.lookupRpcTimeout(conf)
 
-  def awaitTermination(): Unit
+    private[rpc] def endpointRef(endpoint: RpcEndpoint): RpcEndpointRef
 
-  def deserialize[T](deserializationAction: () => T): T
+    def address: RpcAddress
 
-  def fileServer: RpcEnvFileServer
+    def setupEndpoint(name: String, endpoint: RpcEndpoint): RpcEndpointRef
 
-  def openChannel(uri: String): ReadableByteChannel
+    def asyncSetupEndpointRefByURI(uri: String): Future[RpcEndpointRef]
+
+    def setupEndpointRefByURI(uri: String): RpcEndpointRef = {defaultLookupTimeout.awaitResult(asyncSetupEndpointRefByURI(uri))}
+
+
+    def setupEndpointRef(address: RpcAddress, endpointName: String): RpcEndpointRef = {
+        setupEndpointRefByURI(RpcEndpointAddress(address, endpointName).toString)
+    }
+
+    def stop(endpoint: RpcEndpointRef): Unit
+
+    def shutdown(): Unit
+
+    def awaitTermination(): Unit
+
+    def deserialize[T](deserializationAction: () => T): T
+
+    def fileServer: RpcEnvFileServer
+
+    def openChannel(uri: String): ReadableByteChannel
 
 }
 ```

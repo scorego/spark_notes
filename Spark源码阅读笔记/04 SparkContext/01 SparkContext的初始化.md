@@ -99,7 +99,7 @@ private var _cleaner: Option[ContextCleaner] = None
 // LiveListenerBus是否启动的标记
 private var _listenerBusStarted: Boolean = false
 
-// 用户设定的jar文件。当部署模式是YARN时，_jars是由spark.jars和spark.yarn.dist.jars指定的jar文件；其他模式下只采用spark.jars指定的jar文件
+// 用户设定的jar文件。可通过spark.jars指定
 private var _jars: Seq[String] = _
 // 用户设置的文件。可通过spark.files指定
 private var _files: Seq[String] = _
@@ -190,25 +190,90 @@ private[spark] def this(master: String, appName: String, sparkHome: String, jars
 
 # 四、初始化步骤
 
-新建`SparkContext`实例的时候，初始化代码如下：
+新建`SparkContext`实例的时候，主构造器逻辑如下：
 
 ```scala
+private val creationSite: CallSite = Utils.getCallSite()
+
+if (!config.get(EXECUTOR_ALLOW_SPARK_CONTEXT)) {	// "spark.executor.allowSparkContext"
+    // 如果配置为false，则不允许excutor创建SparkContext
+    SparkContext.assertOnDriver()
+}
+
+// 防止多个SparkContext同时处于active状态
+SparkContext.markPartiallyConstructed(this)
+
+val startTime = System.currentTimeMillis()
+
+private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)
+
+logInfo(s"Running Spark version $SPARK_VERSION")
+
+private var _conf: SparkConf = _
+private var _eventLogDir: Option[URI] = None
+private var _eventLogCodec: Option[String] = None
+private var _listenerBus: LiveListenerBus = _
+private var _env: SparkEnv = _
+private var _statusTracker: SparkStatusTracker = _
+private var _progressBar: Option[ConsoleProgressBar] = None
+private var _ui: Option[SparkUI] = None
+private var _hadoopConfiguration: Configuration = _
+private var _executorMemory: Int = _
+private var _schedulerBackend: SchedulerBackend = _
+private var _taskScheduler: TaskScheduler = _
+private var _heartbeatReceiver: RpcEndpointRef = _
+@volatile private var _dagScheduler: DAGScheduler = _
+private var _applicationId: String = _
+private var _applicationAttemptId: Option[String] = None
+private var _eventLogger: Option[EventLoggingListener] = None
+private var _driverLogger: Option[DriverLogger] = None
+private var _executorAllocationManager: Option[ExecutorAllocationManager] = None
+private var _cleaner: Option[ContextCleaner] = None
+private var _listenerBusStarted: Boolean = false
+private var _jars: Seq[String] = _
+private var _files: Seq[String] = _
+private var _archives: Seq[String] = _
+private var _shutdownHookRef: AnyRef = _
+private var _statusStore: AppStatusStore = _
+private var _heartbeater: Heartbeater = _
+private var _resources: immutable.Map[String, ResourceInformation] = _
+private var _shuffleDriverComponents: ShuffleDriverComponents = _
+private var _plugins: Option[PluginContainer] = None
+private var _resourceProfileManager: ResourceProfileManager = _
+
+private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala
+private[spark] val addedArchives = new ConcurrentHashMap[String, Long]().asScala
+private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala
+
+private[spark] val persistentRdds = {
+    val map: ConcurrentMap[Int, RDD[_]] = new MapMaker().weakValues().makeMap[Int, RDD[_]]()
+    map.asScala
+}
+
+// 传递给executor的环境变量
+private[spark] val executorEnvs = HashMap[String, String]()
+
+val sparkUser = Utils.getCurrentUserName()
+
+private[spark] var checkpointDir: Option[String] = None
+
+protected[spark] val localProperties = new InheritableThreadLocal[Properties] {
+    override protected def childValue(parent: Properties): Properties = { Utils.cloneProperties(parent) }
+    override protected def initialValue(): Properties = new Properties()
+}
+
 try {
     _conf = config.clone()
     _conf.validateSettings()
     _conf.set("spark.app.startTime", startTime.toString)
 
-    if (!_conf.contains("spark.master")) {
-        throw new SparkException("A master URL must be set in your configuration")
-    }
-    if (!_conf.contains("spark.app.name")) {
-        throw new SparkException("An application name must be set in your configuration")
-    }
-	
+    if (!_conf.contains("spark.master")) { throw new SparkException("A master URL must be set in your configuration") }
+    if (!_conf.contains("spark.app.name")) { throw new SparkException("An application name must be set in your configuration") }
+
     // 新建DriverLogger
     _driverLogger = DriverLogger(_conf)
 
-    val resourcesFileOpt = conf.get(DRIVER_RESOURCES_FILE)
+    val resourcesFileOpt = conf.get(DRIVER_RESOURCES_FILE)	// "spark.driver.resourcesFile"
     _resources = getOrDiscoverAllResources(_conf, SPARK_DRIVER_PREFIX, resourcesFileOpt)
     logResourceInfo(SPARK_DRIVER_PREFIX, _resources)
 
@@ -220,50 +285,46 @@ try {
                                  "Deployment to YARN is not supported directly by SparkContext. Please use spark-submit.")
     }
 
-    if (_conf.getBoolean("spark.logConf", false)) {
-        logInfo("Spark configuration:\n" + _conf.toDebugString)
-    }
+    if (_conf.getBoolean("spark.logConf", false)) { logInfo("Spark configuration:\n" + _conf.toDebugString) }
 
     // Set Spark driver host and port system properties. This explicitly sets the configuration
     // instead of relying on the default value of the config constant.
     _conf.set(DRIVER_HOST_ADDRESS, _conf.get(DRIVER_HOST_ADDRESS))
     _conf.setIfMissing(DRIVER_PORT, 0)
 
-    _conf.set(EXECUTOR_ID, SparkContext.DRIVER_IDENTIFIER)
+    _conf.set(EXECUTOR_ID, SparkContext.DRIVER_IDENTIFIER)	// 将"spark.executor.id"设为"driver"
 
-    _jars = Utils.getUserJars(_conf)
-    _files = _conf.getOption(FILES.key).map(_.split(",")).map(_.filter(_.nonEmpty))
-    .toSeq.flatten
-    _archives = _conf.getOption(ARCHIVES.key).map(Utils.stringToSeq).toSeq.flatten
+    _jars = Utils.getUserJars(_conf)  // "spark.jars"
+    _files = _conf.getOption(FILES.key).map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten  // "spark.files"
+    _archives = _conf.getOption(ARCHIVES.key).map(Utils.stringToSeq).toSeq.flatten	 // "spark.archives"
 
-    _eventLogDir =
-    if (isEventLogEnabled) {
-        val unresolvedDir = conf.get(EVENT_LOG_DIR).stripSuffix("/")
-        Some(Utils.resolveURI(unresolvedDir))
-    } else {
-        None
-    }
+    _eventLogDir = if (isEventLogEnabled) {	// "spark.eventLog.enabled"
+            val unresolvedDir = conf.get(EVENT_LOG_DIR).stripSuffix("/")	// "spark.eventLog.dir"
+            Some(Utils.resolveURI(unresolvedDir))
+        } else {
+            None
+        }
 
     _eventLogCodec = {
-        val compress = _conf.get(EVENT_LOG_COMPRESS)
-        if (compress && isEventLogEnabled) {
-            Some(_conf.get(EVENT_LOG_COMPRESSION_CODEC)).map(CompressionCodec.getShortName)
+        val compress = _conf.get(EVENT_LOG_COMPRESS)	// "spark.eventLog.compress"
+        if (compress && isEventLogEnabled) {		// "spark.eventLog.enabled"
+            // "spark.eventLog.compression.codec"
+            Some(_conf.get(EVENT_LOG_COMPRESSION_CODEC)).map(CompressionCodec.getShortName) 
         } else {
             None
         }
     }
-	
+
     // 新建事件总线
     _listenerBus = new LiveListenerBus(_conf)
     _resourceProfileManager = new ResourceProfileManager(_conf, _listenerBus)
 
-    // Initialize the app status store and listener before SparkEnv is created so that it gets
-    // all events.
+    // Initialize the app status store and listener before SparkEnv is created so that it gets all events.
     val appStatusSource = AppStatusSource.createSource(conf)
     _statusStore = AppStatusStore.createLiveStore(conf, appStatusSource)
     listenerBus.addToStatusQueue(_statusStore.listener.get)
 
-    // 新建executor的SparkEnv(cache, map output tracker, etc)
+    // 新建SparkEnv(cache, map output tracker, etc)
     _env = createSparkEnv(_conf, isLocal, listenerBus)
     SparkEnv.set(_env)
 
@@ -275,23 +336,20 @@ try {
 
     _statusTracker = new SparkStatusTracker(this, _statusStore)
 
-    _progressBar =
-        if (_conf.get(UI_SHOW_CONSOLE_PROGRESS)) {
+    _progressBar = if (_conf.get(UI_SHOW_CONSOLE_PROGRESS)) {
             Some(new ConsoleProgressBar(this))
         } else {
             None
         }
 
-    _ui =
-        if (conf.get(UI_ENABLED)) {
-            Some(SparkUI.create(Some(this), _statusStore, _conf, _env.securityManager, appName, "",
-                                startTime))
+    _ui = if (conf.get(UI_ENABLED)) {
+            Some(SparkUI.create(Some(this), _statusStore, _conf, _env.securityManager, appName, "", startTime))
         } else {
             // For tests, do not enable the UI
             None
         }
-    // Bind the UI before starting the task scheduler to communicate
-    // the bound port to the cluster manager properly
+    
+    // Bind the UI before starting the task scheduler to communicate the bound port to the cluster manager properly
     _ui.foreach(_.bind())
 
     _hadoopConfiguration = SparkHadoopUtil.get.newConfiguration(_conf)
@@ -327,24 +385,17 @@ try {
         }
     }
 
-    _executorMemory = _conf.getOption(EXECUTOR_MEMORY.key)
-        .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))
+    _executorMemory = _conf.getOption(EXECUTOR_MEMORY.key)			// "spark.executor.memory"
+        .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))		// 
         .orElse(Option(System.getenv("SPARK_MEM"))
-                .map(warnSparkMem))
+        .map(warnSparkMem))
         .map(Utils.memoryStringToMb)
         .getOrElse(1024)
 
-    // Convert java options to env vars as a work around
-    // since we can't set env vars directly in sbt.
+    // Convert java options to env vars as a work around since we can't set env vars directly in sbt.
     for { (envKey, propKey) <- Seq(("SPARK_TESTING", IS_TESTING.key))
-        value <- Option(System.getenv(envKey)).orElse(Option(System.getProperty(propKey)))} {
-        executorEnvs(envKey) = value
-    }
-    Option(System.getenv("SPARK_PREPEND_CLASSES")).foreach { v =>
-        executorEnvs("SPARK_PREPEND_CLASSES") = v
-    }
-    // The Mesos scheduler backend relies on this environment variable to set executor memory.
-    // TODO: Set this only in the Mesos scheduler.
+         value <- Option(System.getenv(envKey)).orElse(Option(System.getProperty(propKey)))} { executorEnvs(envKey) = value }
+    Option(System.getenv("SPARK_PREPEND_CLASSES")).foreach { v => executorEnvs("SPARK_PREPEND_CLASSES") = v }
     executorEnvs("SPARK_EXECUTOR_MEMORY") = executorMemory + "m"
     executorEnvs ++= _conf.getExecutorEnv
     executorEnvs("SPARK_USER") = sparkUser
@@ -356,8 +407,7 @@ try {
 
     // We need to register "HeartbeatReceiver" before "createTaskScheduler" because Executor will
     // retrieve "HeartbeatReceiver" in the constructor. (SPARK-6640)
-    _heartbeatReceiver = env.rpcEnv.setupEndpoint(
-        HeartbeatReceiver.ENDPOINT_NAME, new HeartbeatReceiver(this))
+    _heartbeatReceiver = env.rpcEnv.setupEndpoint(HeartbeatReceiver.ENDPOINT_NAME, new HeartbeatReceiver(this))
 
     // Initialize any plugins before the task scheduler is initialized.
     _plugins = PluginContainer(this, _resources.asJava)
@@ -369,12 +419,11 @@ try {
     _dagScheduler = new DAGScheduler(this)
     _heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
 
-    val _executorMetricsSource =
-    if (_conf.get(METRICS_EXECUTORMETRICS_SOURCE_ENABLED)) {
-        Some(new ExecutorMetricsSource)
-    } else {
-        None
-    }
+    val _executorMetricsSource = if (_conf.get(METRICS_EXECUTORMETRICS_SOURCE_ENABLED)) {
+            Some(new ExecutorMetricsSource)
+        } else {
+            None
+        }
 
     // create and start the heartbeater for collecting memory metrics
     _heartbeater = new Heartbeater(
@@ -383,16 +432,15 @@ try {
         conf.get(EXECUTOR_HEARTBEAT_INTERVAL))
     _heartbeater.start()
 
-    // start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's
-    // constructor
+    // start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's constructor
     _taskScheduler.start()
 
     _applicationId = _taskScheduler.applicationId()
     _applicationAttemptId = _taskScheduler.applicationAttemptId()
     _conf.set("spark.app.id", _applicationId)
-    if (_conf.get(UI_REVERSE_PROXY)) {
-        val proxyUrl = _conf.get(UI_REVERSE_PROXY_URL.key, "").stripSuffix("/") +
-        "/proxy/" + _applicationId
+    if (_conf.get(UI_REVERSE_PROXY)) {		// "spark.ui.reverseProxy"
+        // UI_REVERSE_PROXY_URL: "spark.ui.reverseProxyUrl"
+        val proxyUrl = _conf.get(UI_REVERSE_PROXY_URL.key, "").stripSuffix("/") + "/proxy/" + _applicationId	
         System.setProperty("spark.ui.proxyBase", proxyUrl)
     }
     _ui.foreach(_.setAppId(_applicationId))
@@ -401,44 +449,44 @@ try {
 
     // The metrics system for Driver need to be set spark.app.id to app ID.
     // So it should start after we get app ID from the task scheduler and set spark.app.id.
-    _env.metricsSystem.start(_conf.get(METRICS_STATIC_SOURCES_ENABLED))
+    _env.metricsSystem.start(_conf.get(METRICS_STATIC_SOURCES_ENABLED))		// "spark.metrics.staticSources.enabled"
     // Attach the driver metrics servlet handler to the web ui after the metrics system is started.
     _env.metricsSystem.getServletHandlers.foreach(handler => ui.foreach(_.attachHandler(handler)))
 
-    _eventLogger =
-    if (isEventLogEnabled) {
-        val logger =
-        new EventLoggingListener(_applicationId, _applicationAttemptId, _eventLogDir.get,
-                                 _conf, _hadoopConfiguration)
-        logger.start()
-        listenerBus.addToEventLogQueue(logger)
-        Some(logger)
-    } else {
-        None
-    }
+    _eventLogger = if (isEventLogEnabled) {
+            val logger = new EventLoggingListener(_applicationId, 
+                                                  _applicationAttemptId, 
+                                                  _eventLogDir.get, 
+                                                  _conf, 
+                                                  _hadoopConfiguration)
+            logger.start()
+            listenerBus.addToEventLogQueue(logger)
+            Some(logger)
+        } else {
+            None
+        }
 
-    _cleaner =
-    if (_conf.get(CLEANER_REFERENCE_TRACKING)) {
-        Some(new ContextCleaner(this, _shuffleDriverComponents))
-    } else {
-        None
-    }
+    _cleaner = if (_conf.get(CLEANER_REFERENCE_TRACKING)) {	// "spark.cleaner.referenceTracking"
+            Some(new ContextCleaner(this, _shuffleDriverComponents))
+        } else {
+            None
+        }
     _cleaner.foreach(_.start())
 
     val dynamicAllocationEnabled = Utils.isDynamicAllocationEnabled(_conf)
-    _executorAllocationManager =
-    if (dynamicAllocationEnabled) {
-        schedulerBackend match {
-            case b: ExecutorAllocationClient =>
-            Some(new ExecutorAllocationManager(
-                schedulerBackend.asInstanceOf[ExecutorAllocationClient], listenerBus, _conf,
-                cleaner = cleaner, resourceProfileManager = resourceProfileManager))
-            case _ =>
+    _executorAllocationManager = if (dynamicAllocationEnabled) {
+            schedulerBackend match {
+                case b: ExecutorAllocationClient =>
+                    Some(new ExecutorAllocationManager(schedulerBackend.asInstanceOf[ExecutorAllocationClient],
+                                                       listenerBus, 
+                                                       _conf,
+                        							   cleaner = cleaner, 
+                                                       resourceProfileManager = resourceProfileManager))
+                case _ => None
+            }
+        } else {
             None
         }
-    } else {
-        None
-    }
     _executorAllocationManager.foreach(_.start())
 
     setupAndStartListenerBus()
@@ -447,40 +495,31 @@ try {
 
     // Post init
     _taskScheduler.postStartHook()
-    if (isLocal) {
-        _env.metricsSystem.registerSource(Executor.executorSourceLocalModeOnly)
-    }
+    if (isLocal) { _env.metricsSystem.registerSource(Executor.executorSourceLocalModeOnly) }
     _env.metricsSystem.registerSource(_dagScheduler.metricsSource)
     _env.metricsSystem.registerSource(new BlockManagerSource(_env.blockManager))
     _env.metricsSystem.registerSource(new JVMCPUSource())
     _executorMetricsSource.foreach(_.register(_env.metricsSystem))
-    _executorAllocationManager.foreach { e =>
-        _env.metricsSystem.registerSource(e.executorAllocationManagerSource)
-    }
+    _executorAllocationManager.foreach { e => _env.metricsSystem.registerSource(e.executorAllocationManagerSource) }
     appStatusSource.foreach(_env.metricsSystem.registerSource(_))
     _plugins.foreach(_.registerMetrics(applicationId))
     // Make sure the context is stopped if the user forgets about it. This avoids leaving
-    // unfinished event logs around after the JVM exits cleanly. It doesn't help if the JVM
-    // is killed, though.
+    // unfinished event logs around after the JVM exits cleanly. It doesn't help if the JVM is killed, though.
     logDebug("Adding shutdown hook") // force eager creation of logger
-    _shutdownHookRef = ShutdownHookManager.addShutdownHook(
-        ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY) { () =>
-        logInfo("Invoking stop() from shutdown hook")
-        try {
-            stop()
-        } catch {
-            case e: Throwable =>
-            logWarning("Ignoring Exception while stopping SparkContext from shutdown hook", e)
-        }
+    _shutdownHookRef = ShutdownHookManager.addShutdownHook(ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY) { () => 
+            logInfo("Invoking stop() from shutdown hook")
+            try {
+                stop()
+            } catch {
+                case e: Throwable => logWarning("Ignoring Exception while stopping SparkContext from shutdown hook", e)
+            }
     }
 } catch {
-    case NonFatal(e) =>
-    logError("Error initializing SparkContext.", e)
+    case NonFatal(e) => logError("Error initializing SparkContext.", e)
     try {
         stop()
     } catch {
-        case NonFatal(inner) =>
-        logError("Error stopping SparkContext after init error.", inner)
+        case NonFatal(inner) => logError("Error stopping SparkContext after init error.", inner)
     } finally {
         throw e
     }
