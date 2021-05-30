@@ -141,25 +141,17 @@ private[spark] var checkpointDir: Option[String] = None
 `SparkContext`的伴生对象提供了`getOrCreate()`来获取`SparkContext`实例。
 
 ```scala
-/**
-  * This function may be used to get or instantiate a SparkContext and register it as a
-  * singleton object. Because we can only have one active SparkContext per JVM,
-  * this is useful when applications may wish to share a SparkContext.
-  *
-  * @param config `SparkConfig` that will be used for initialisation of the `SparkContext`
-  * @return current `SparkContext` (or a new one if it wasn't created before the function call)
-  */
+// 一个JVM只能有一个激活的SparkContext
 def getOrCreate(config: SparkConf): SparkContext = {
     SPARK_CONTEXT_CONSTRUCTOR_LOCK.synchronized {
-        if (activeContext.get() == null) {
-            // 实际上就是new SparkContext(config)
-            setActiveContext(new SparkContext(config))
-        } else {
-            if (config.getAll.nonEmpty) {
-                logWarning("Using an existing SparkContext; some configuration may not take effect.")
-            }
+      if (activeContext.get() == null) {
+        setActiveContext(new SparkContext(config))
+      } else {
+        if (config.getAll.nonEmpty) {
+          logWarning("Using an existing SparkContext; some configuration may not take effect.")
         }
-        activeContext.get()
+      }
+      activeContext.get()
     }
 }
 ```
