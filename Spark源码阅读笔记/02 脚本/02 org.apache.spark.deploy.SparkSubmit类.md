@@ -5,27 +5,28 @@
 > ```bash
 > spark-submit脚本命令：
 > ./bin/spark-submit \
->   --class com.example.WordCount \
->   --master spark://127.0.0.1:7077 \
->   --deploy-mode cluster \
->   --executor-memory 4G \
->   ./user-jar-0.1.1.jar \
->   arg1 \
->   arg2
->  
+>     --class com.example.WordCount \
+>     --master spark://127.0.0.1:7077 \
+>     --deploy-mode cluster \
+>     --executor-memory 4G \
+>     ./user-jar-0.1.1.jar arg1 arg2
+> 
 > 实际上相当于调用spark-class脚本并执行命令：
 > java -Xmx128m -cp ...jars org.apache.spark.launcher.Main \
->           org.apache.spark.deploy.SparkSubmit \
->           --class com.example.WordCount \
->           --master spark://127.0.0.1:7077 \
->           --deploy-mode cluster \
->           --executor-memory 4G \
->           ./user-jar-0.1.1.jar \
->          arg1 \
->          arg2
+>     org.apache.spark.deploy.SparkSubmit \
+>     --class com.example.WordCount \
+>     --master spark://127.0.0.1:7077 \
+>     --deploy-mode cluster \
+>     --executor-memory 4G \
+>     ./user-jar-0.1.1.jar arg1 arg2
 > 
 > 最终执行的命令是：
-> java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit --master spark://127.0.0.1:7077 --deploy-mode cluster --class com.example.WordCount --executor-memory 4G ./user-jar-0.1.1.jar arg1 arg2
+> java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit \
+> 	--master spark://127.0.0.1:7077 \
+> 	--deploy-mode cluster \
+> 	--class com.example.WordCount \
+> 	--executor-memory 4G \
+> 	./user-jar-0.1.1.jar arg1 arg2
 > ```
 >
 > 
@@ -247,13 +248,13 @@ java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit --maste
 `parseArguments`这个方法是在实例化`SparkSubmit`类的时候被重写过的，不过也就是更改打印日志的一些细节，主要还是通过新建`org.apache.spark.deploy.SparkSubmitArguments`类实例来解析参数：
 
 ```scala
-  override protected def parseArguments(args: Array[String]): SparkSubmitArguments = {
-        new SparkSubmitArguments(args) {
-          override protected def logInfo(msg: => String): Unit = self.logInfo(msg)
-          override protected def logWarning(msg: => String): Unit = self.logWarning(msg)
-          override protected def logError(msg: => String): Unit = self.logError(msg)
-        }
-  }
+override protected def parseArguments(args: Array[String]): SparkSubmitArguments = {
+    new SparkSubmitArguments(args) {
+        override protected def logInfo(msg: => String): Unit = self.logInfo(msg)
+        override protected def logWarning(msg: => String): Unit = self.logWarning(msg)
+        override protected def logError(msg: => String): Unit = self.logError(msg)
+    }
+}
 ```
 
 `org.apache.spark.deploy.SparkSubmitArguments`类继承了`org.apache.spark.launcher.SparkSubmitArgumentsParser`类，并调用`parse`方法来解析参数：
@@ -319,7 +320,7 @@ private[deploy] object SparkSubmitAction extends Enumeration {
 2. 使用该启动环境来调用子类的main方法
 
 ```scala
-  /**
+/**
    * Run the main method of the child class using the submit arguments.
    *
    * This runs in two steps. First, we prepare the launch environment by setting up
@@ -331,84 +332,82 @@ private[deploy] object SparkSubmitAction extends Enumeration {
    * Note that this main class will not be the one provided by the user if we're
    * running cluster deploy mode or python applications.
    */
-  private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
+private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
     // 准备环境
     val (childArgs, childClasspath, sparkConf, childMainClass) = prepareSubmitEnvironment(args)
-    
-      // Let the main class re-initialize the logging system once it starts.
+
+    // Let the main class re-initialize the logging system once it starts.
     // 启动main后重新初始化logging
     if (uninitLog) {
-      Logging.uninitialize()
+        Logging.uninitialize()
     }
 
     if (args.verbose) {
-      logInfo(s"Main class:\n$childMainClass")
-      logInfo(s"Arguments:\n${childArgs.mkString("\n")}")
-      // sysProps may contain sensitive information, so redact before printing
-      logInfo(s"Spark config:\n${Utils.redact(sparkConf.getAll.toMap).mkString("\n")}")
-      logInfo(s"Classpath elements:\n${childClasspath.mkString("\n")}")
-      logInfo("\n")
+        logInfo(s"Main class:\n$childMainClass")
+        logInfo(s"Arguments:\n${childArgs.mkString("\n")}")
+        // sysProps may contain sensitive information, so redact before printing
+        logInfo(s"Spark config:\n${Utils.redact(sparkConf.getAll.toMap).mkString("\n")}")
+        logInfo(s"Classpath elements:\n${childClasspath.mkString("\n")}")
+        logInfo("\n")
     }
-   
+
     //
     val loader = getSubmitClassLoader(sparkConf)
     for (jar <- childClasspath) {
-      addJarToClasspath(jar, loader)
+        addJarToClasspath(jar, loader)
     }
-    
+
     // 
     var mainClass: Class[_] = null
     try {
-      mainClass = Utils.classForName(childMainClass)
+        mainClass = Utils.classForName(childMainClass)
     } catch {
-      case e: ClassNotFoundException =>
-        logError(s"Failed to load class $childMainClass.")
-        if (childMainClass.contains("thriftserver")) {
-          logInfo(s"Failed to load main class $childMainClass.")
-          logInfo("You need to build Spark with -Phive and -Phive-thriftserver.")
-        }
-        throw new SparkUserAppException(CLASS_NOT_FOUND_EXIT_STATUS)
-      case e: NoClassDefFoundError =>
-        logError(s"Failed to load $childMainClass: ${e.getMessage()}")
-        if (e.getMessage.contains("org/apache/hadoop/hive")) {
-          logInfo(s"Failed to load hive class.")
-          logInfo("You need to build Spark with -Phive and -Phive-thriftserver.")
-        }
-        throw new SparkUserAppException(CLASS_NOT_FOUND_EXIT_STATUS)
+            case e: ClassNotFoundException =>
+            logError(s"Failed to load class $childMainClass.")
+            if (childMainClass.contains("thriftserver")) {
+                logInfo(s"Failed to load main class $childMainClass.")
+                logInfo("You need to build Spark with -Phive and -Phive-thriftserver.")
+            }
+            throw new SparkUserAppException(CLASS_NOT_FOUND_EXIT_STATUS)
+        case e: NoClassDefFoundError =>
+            logError(s"Failed to load $childMainClass: ${e.getMessage()}")
+            if (e.getMessage.contains("org/apache/hadoop/hive")) {
+                logInfo(s"Failed to load hive class.")
+                logInfo("You need to build Spark with -Phive and -Phive-thriftserver.")
+            }
+            throw new SparkUserAppException(CLASS_NOT_FOUND_EXIT_STATUS)
     }
 
     val app: SparkApplication = if (classOf[SparkApplication].isAssignableFrom(mainClass)) {
-      mainClass.getConstructor().newInstance().asInstanceOf[SparkApplication]
+        mainClass.getConstructor().newInstance().asInstanceOf[SparkApplication]
     } else {
-      new JavaMainApplication(mainClass)
+        new JavaMainApplication(mainClass)
     }
 
     @tailrec
     def findCause(t: Throwable): Throwable = t match {
-      case e: UndeclaredThrowableException =>
-        if (e.getCause() != null) findCause(e.getCause()) else e
-      case e: InvocationTargetException =>
-        if (e.getCause() != null) findCause(e.getCause()) else e
-      case e: Throwable =>
-        e
+        case e: UndeclaredThrowableException =>
+        	if (e.getCause() != null) findCause(e.getCause()) else e
+        case e: InvocationTargetException =>
+        	if (e.getCause() != null) findCause(e.getCause()) else e
+        case e: Throwable => e
     }
 
     try {
-      app.start(childArgs.toArray, sparkConf)
+        app.start(childArgs.toArray, sparkConf)
     } catch {
-      case t: Throwable =>
+        case t: Throwable =>
         throw findCause(t)
     } finally {
-      if (!isShell(args.primaryResource) && !isSqlShell(args.mainClass) &&
-        !isThriftServer(args.mainClass)) {
-        try {
-          SparkContext.getActive.foreach(_.stop())
-        } catch {
-          case e: Throwable => logError(s"Failed to close SparkContext: $e")
+        if (!isShell(args.primaryResource) && !isSqlShell(args.mainClass) && !isThriftServer(args.mainClass)) {
+            try {
+                SparkContext.getActive.foreach(_.stop())
+            } catch {
+                case e: Throwable => logError(s"Failed to close SparkContext: $e")
+            }
         }
-      }
     }
-  }
+}
 ```
 
 ## 1. 准备环境：prepareSubmitEnvironment()
@@ -464,8 +463,7 @@ private[deploy] object SparkSubmitAction extends Enumeration {
       // Make sure YARN is included in our build if we're trying to use it
       if (!Utils.classIsLoadable(YARN_CLUSTER_SUBMIT_CLASS) && !Utils.isTesting) {
         error(
-          "Could not load YARN classes. " +
-          "This copy of Spark may not have been compiled with YARN support.")
+          "Could not load YARN classes. This copy of Spark may not have been compiled with YARN support.")
       }
     }
 
@@ -473,20 +471,16 @@ private[deploy] object SparkSubmitAction extends Enumeration {
       args.master = Utils.checkAndGetK8sMasterUrl(args.master)
       // Make sure KUBERNETES is included in our build if we're trying to use it
       if (!Utils.classIsLoadable(KUBERNETES_CLUSTER_SUBMIT_CLASS) && !Utils.isTesting) {
-        error(
-          "Could not load KUBERNETES classes. " +
-            "This copy of Spark may not have been compiled with KUBERNETES support.")
+        error("Could not load KUBERNETES classes. This copy of Spark may not have been compiled with KUBERNETES support.")
       }
     }
 
     // Fail fast, the following modes are not supported or applicable
     (clusterManager, deployMode) match {
       case (STANDALONE, CLUSTER) if args.isPython =>
-        error("Cluster deploy mode is currently not supported for python " +
-          "applications on standalone clusters.")
+        error("Cluster deploy mode is currently not supported for python applications on standalone clusters.")
       case (STANDALONE, CLUSTER) if args.isR =>
-        error("Cluster deploy mode is currently not supported for R " +
-          "applications on standalone clusters.")
+        error("Cluster deploy mode is currently not supported for R applications on standalone clusters.")
       case (LOCAL, CLUSTER) =>
         error("Cluster deploy mode is not compatible with master \"local\"")
       case (_, CLUSTER) if isShell(args.primaryResource) =>
@@ -509,8 +503,7 @@ private[deploy] object SparkSubmitAction extends Enumeration {
     val isStandAloneCluster = clusterManager == STANDALONE && deployMode == CLUSTER
     val isKubernetesCluster = clusterManager == KUBERNETES && deployMode == CLUSTER
     val isKubernetesClient = clusterManager == KUBERNETES && deployMode == CLIENT
-    val isKubernetesClusterModeDriver = isKubernetesClient &&
-      sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
+    val isKubernetesClusterModeDriver = isKubernetesClient && sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
 
     if (!isMesosCluster && !isStandAloneCluster) {
       // Resolve maven dependencies if there are any and add classpath to jars. Add them to py-files
@@ -1111,27 +1104,22 @@ private[deploy] object SparkSubmitAction extends Enumeration {
 	// 
     @tailrec
     def findCause(t: Throwable): Throwable = t match {
-      case e: UndeclaredThrowableException =>
-        if (e.getCause() != null) findCause(e.getCause()) else e
-      case e: InvocationTargetException =>
-        if (e.getCause() != null) findCause(e.getCause()) else e
-      case e: Throwable =>
-        e
+      case e: UndeclaredThrowableException => if (e.getCause() != null) findCause(e.getCause()) else e
+      case e: InvocationTargetException => if (e.getCause() != null) findCause(e.getCause()) else e
+      case e: Throwable => e
     }
 
     try {
       // 启动实例
       app.start(childArgs.toArray, sparkConf)
     } catch {
-      case t: Throwable =>
-        throw findCause(t)
+      case t: Throwable => throw findCause(t)
     } finally {
-      if (!isShell(args.primaryResource) && !isSqlShell(args.mainClass) &&
-        !isThriftServer(args.mainClass)) {
+      if (!isShell(args.primaryResource) && !isSqlShell(args.mainClass) && !isThriftServer(args.mainClass)) {
         try {
-          SparkContext.getActive.foreach(_.stop())
+          	SparkContext.getActive.foreach(_.stop())
         } catch {
-          case e: Throwable => logError(s"Failed to close SparkContext: $e")
+          	case e: Throwable => logError(s"Failed to close SparkContext: $e")
         }
       }
     }
@@ -1150,27 +1138,27 @@ private[deploy] object SparkSubmitAction extends Enumeration {
  */
 private[deploy] class JavaMainApplication(klass: Class[_]) extends SparkApplication {
 
-  override def start(args: Array[String], conf: SparkConf): Unit = {
-    // 通过反射获取静态main()方法
-    val mainMethod = klass.getMethod("main", new Array[String](0).getClass)
-    if (!Modifier.isStatic(mainMethod.getModifiers)) {
-      throw new IllegalStateException("The main method in the given main class must be static")
+    override def start(args: Array[String], conf: SparkConf): Unit = {
+        // 通过反射获取静态main()方法
+        val mainMethod = klass.getMethod("main", new Array[String](0).getClass)
+        if (!Modifier.isStatic(mainMethod.getModifiers)) {
+            throw new IllegalStateException("The main method in the given main class must be static")
+        }
+
+        // 获取配置，把配置写入sys
+        val sysProps = conf.getAll.toMap
+        sysProps.foreach { case (k, v) => sys.props(k) = v }
+
+        // 调用真正主类（--class的类)的main()
+        mainMethod.invoke(null, args)
     }
-    
-    // 获取配置，把配置写入sys
-    val sysProps = conf.getAll.toMap
-    sysProps.foreach { case (k, v) => sys.props(k) = v }
-    
-    // 调用真正主类（--class的类)的main()
-    mainMethod.invoke(null, args)
-  }
 }
 
 /**
  * Entry point for a Spark application. Implementations must provide a no-argument constructor.
  */
 private[spark] trait SparkApplication {
-  def start(args: Array[String], conf: SparkConf): Unit
+    def start(args: Array[String], conf: SparkConf): Unit
 }
 ```
 

@@ -38,11 +38,11 @@ object WordCount {
 
 结果如下：
 
-![01_sparksql示例](../pics/sparksql/01_001_sparksql示例.png)
+![01_sparksql示例](./pics/01_001_sparksql示例.png)
 
 代码中的操作可以分为3步：
 
-- 创建SparkSession。从2.0开始，SparkSession逐步取代SparkContext称为Spark应用程序的入口。
+- 创建`SparkSession`。从2.0开始，`SparkSession`逐步取代`SparkContext`称为Spark应用程序的入口。
 - 创建数据表并读取数据。
 - 通过SQL进行数据分析。
 

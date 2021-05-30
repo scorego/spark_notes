@@ -136,7 +136,7 @@ val sparkUser = Utils.getCurrentUserName()
 private[spark] var checkpointDir: Option[String] = None
 ```
 
-# 二、`getOrCreate()`
+# 二、`SparkContext.getOrCreate()`
 
 `SparkContext`的伴生对象提供了`getOrCreate()`来获取`SparkContext`实例。
 
@@ -150,10 +150,9 @@ private[spark] var checkpointDir: Option[String] = None
   * @return current `SparkContext` (or a new one if it wasn't created before the function call)
   */
 def getOrCreate(config: SparkConf): SparkContext = {
-    // Synchronize to ensure that multiple create requests don't trigger an exception
-    // from assertNoOtherContextIsRunning within setActiveContext
     SPARK_CONTEXT_CONSTRUCTOR_LOCK.synchronized {
         if (activeContext.get() == null) {
+            // 实际上就是new SparkContext(config)
             setActiveContext(new SparkContext(config))
         } else {
             if (config.getAll.nonEmpty) {
@@ -165,7 +164,7 @@ def getOrCreate(config: SparkConf): SparkContext = {
 }
 ```
 
-本方法实际上就是使用`SparkConf`作为主构造器的参数来`new SparkContext(config)`。
+本方法实际上就是使用`SparkConf`作为主构造器的参数来`new SparkContext(config)`。`SparkSession.builder().getOrCreate()`方法中会使用`SparkContext.getOrCreate(sparkConf)`来获取`SparkContext`。
 
 # 三、构造器方法
 
