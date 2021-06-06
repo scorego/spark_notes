@@ -1,4 +1,4 @@
-`TransportContext`内部包含配置信息`TransportConf`和对客户端请求消息进行处理的`RpcHandler`。
+`TransportContext`内部包含传输配置信息`TransportConf`和对收到的RPC消息进行处理的`RpcHandler`，可以用来创建RPC客户端工厂类 `TransportClientFactory`和RPC服务端`TransportServer`。
 
 ```java
 package org.apache.spark.network;
@@ -49,6 +49,8 @@ public class TransportContext implements Closeable {
 
 # 一、`TransportConf`
 
+`TransportConf`是传输配置信息。
+
 ```java
 package org.apache.spark.network.util;
 
@@ -86,7 +88,7 @@ public class TransportConf {
 }
 ```
 
-Spark通常使用`SparkTransportConf`创建`TransportConf`，代码如下：
+Spark通常使用`SparkTransportConf.SparkTransportConf()`方法创建`TransportConf`，代码如下：
 
 ```scala
 package org.apache.spark.network.netty
@@ -444,7 +446,7 @@ public class TransportClient implements Closeable {
 
 # 三、 RPC服务端`TransportServer`
 
-`TransportServer`是RPC框架的服务端，`TransportContext`的`createServer()`方法用于创建`TransportServer`，最终还是调用`TransportServer`的构造器。
+`TransportServer`是RPC框架的服务端，`TransportContext`的`createServer()`方法用于创建`TransportServer`实例，最终调用的是`TransportServer`的构造器。
 
 ```java
 public TransportServer createServer(int port, List<TransportServerBootstrap> bootstraps) {
@@ -593,7 +595,7 @@ public class SaslServerBootstrap implements TransportServerBootstrap
 
 # 四、 `initializePipeline()`
 
-`TransportClientFactory`创建`TransportClient`和`TransportContext`创建`TransportServer`的初始化中，调用了`TransportContext`的`initializePipeline()`方法，`initializePipeline()`的用途是管道初始化，代码如下:
+`TransportClientFactory`创建`TransportClient`和`TransportContext`创建`TransportServer`的初始化中，调用了`TransportContext`的`initializePipeline()`方法，`initializePipeline()`的用途是调用Netty的API对管道初始化，代码如下:
 
 ```java
 /**

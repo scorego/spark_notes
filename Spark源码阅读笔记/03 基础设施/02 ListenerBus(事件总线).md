@@ -1,8 +1,8 @@
-> `ListenerBus`特质是事件总线的意思，事件总线可以接受事件并将事件提交给对应的监听器。我们经常看到基于事件的监控、数据采集等，Spark-Core内部的事件框架实现了基于事件的异步化编程模式。它的最大好处是可以提升应用程序对物理资源的充分利用，能最大限度的压榨物理资源，提升应用程序的处理效率；缺点比较明显，降低了应用程序的可读性。Spark的基于事件的异步化编程框架由事件框架和异步执行线程池组成，应用程序产生的Event发送给`ListenerBus`，`ListenerBus`再把消息广播给所有的Listener，每个Listener收到Event后判断是否自己感兴趣的Event，若是，会在Listener独享的线程池中执行Event所对应的逻辑程序块。
+> `ListenerBus[L <: AnyRef, E]`特质是事件总线的意思，事件总线可以接受事件并将事件提交给对应的监听器。我们经常看到基于事件的监控、数据采集等，Spark -Core内部的事件框架实现了基于事件的异步化编程模式。它的最大好处是可以提升应用程序对物理资源的充分利用，能最大限度的压榨物理资源，提升应用程序的处理效率；缺点比较明显，降低了应用程序的可读性。Spark的基于事件的异步化编程框架由事件框架和异步执行线程池组成，应用程序产生的Event发送给`ListenerBus`，`ListenerBus`再把消息广播给所有的Listener，每个Listener收到Event后判断是否自己感兴趣的Event，若是，会在Listener独享的线程池中执行Event所对应的逻辑程序块。
 
 # 一、 `ListenerBus`
 
-`ListenerBus`是个泛型特质，泛型参数为`[L <: AnyRef, E]`，其中`L`是代表监听器，`E`代表事件。
+`ListenerBus[L <: AnyRef, E]`是个泛型特质，泛型参数为`[L <: AnyRef, E]`，其中`L`是代表监听器，`E`代表事件。
 
 ```scala
 package org.apache.spark.util
