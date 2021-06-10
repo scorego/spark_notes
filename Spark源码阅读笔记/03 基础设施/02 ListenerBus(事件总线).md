@@ -1,4 +1,4 @@
-> `ListenerBus[L <: AnyRef, E]`特质是事件总线的意思，事件总线可以接受事件并将事件提交给对应的监听器。我们经常看到基于事件的监控、数据采集等，Spark -Core内部的事件框架实现了基于事件的异步化编程模式。它的最大好处是可以提升应用程序对物理资源的充分利用，能最大限度的压榨物理资源，提升应用程序的处理效率；缺点比较明显，降低了应用程序的可读性。Spark的基于事件的异步化编程框架由事件框架和异步执行线程池组成，应用程序产生的Event发送给`ListenerBus`，`ListenerBus`再把消息广播给所有的Listener，每个Listener收到Event后判断是否自己感兴趣的Event，若是，会在Listener独享的线程池中执行Event所对应的逻辑程序块。
+> `ListenerBus[L <: AnyRef, E]`特质是事件总线的意思，事件总线可以接受事件并将事件提交给对应的监听器，我们经常看到基于事件的监控、数据采集等。Spark Core内部的事件框架实现了基于事件的异步化编程模式，它的最大好处是可以提升应用程序对物理资源的充分利用，能最大限度的压榨物理资源，提升应用程序的处理效率；缺点比较明显，降低了应用程序的可读性。Spark的基于事件的异步化编程框架由事件框架和异步执行线程池组成，应用程序产生的Event发送给`ListenerBus`，`ListenerBus`再把消息广播给所有的Listener，每个Listener收到Event后判断是否自己感兴趣的Event，若是，会在Listener独享的线程池中执行Event所对应的逻辑程序块。
 
 # 一、 `ListenerBus`
 
@@ -64,7 +64,7 @@ private[spark] trait ListenerBus[L <: AnyRef, E] extends Logging {
                     logError(s"Interrupted while posting to ${listenerName}. Removing that listener.", ie)
                     removeListenerOnError(listener)
                 case NonFatal(e) if !isIgnorableException(e) =>
-                	logError(s"Listener ${listenerName} threw an exception", e)
+                		logError(s"Listener ${listenerName} threw an exception", e)
             } finally {
                 if (maybeTimerContext != null) {
                     val elapsed = maybeTimerContext.stop()
@@ -197,7 +197,7 @@ private class AsyncEventQueue(
         bus: LiveListenerBus) extends SparkListenerBus with Logging {
     
     // 存放事件的队列，具体是个LinkedBlockingQueue
-	private val eventQueue = new LinkedBlockingQueue[SparkListenerEvent](capacity)
+		private val eventQueue = new LinkedBlockingQueue[SparkListenerEvent](capacity)
      
     // 事件传播异步化线程，即每个AsyncEventQueue实例有一个专门的线程来分发事件
     private val dispatchThread = new Thread(s"spark-listener-group-$name") {
@@ -207,7 +207,8 @@ private class AsyncEventQueue(
         }
   	}
     
-    // 不停的从eventQueue中取事件，并投递到所有监听器去。监听器根据事件类型调用相匹配的方法，不同监听器只要实现不同的方法即可对不同事件做相应的操作。
+    // 不停的从eventQueue中取事件，并投递到所有监听器去。
+  	//  监听器根据事件类型调用相匹配的方法，不同监听器只要实现不同的方法即可对不同事件做相应的操作。
     private def dispatch(): Unit = LiveListenerBus.withinListenerThread.withValue(true) {
         var next: SparkListenerEvent = eventQueue.take()
         while (next != POISON_PILL) {
@@ -291,7 +292,7 @@ private object AsyncEventQueue {
 private[spark] trait SparkListenerInterface {
 	
     // stage完成时触发的事件
-	def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit
+		def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit
 	
     // stage提交时触发的事件
     def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit
@@ -306,12 +307,12 @@ private[spark] trait SparkListenerInterface {
     def onJobStart(jobStart: SparkListenerJobStart): Unit
     def onJobEnd(jobEnd: SparkListenerJobEnd): Unit
     def onEnvironmentUpdate(environmentUpdate: SparkListenerEnvironmentUpdate): Unit
-	def onBlockManagerAdded(blockManagerAdded: SparkListenerBlockManagerAdded): Unit
+		def onBlockManagerAdded(blockManagerAdded: SparkListenerBlockManagerAdded): Unit
     def onBlockManagerRemoved(blockManagerRemoved: SparkListenerBlockManagerRemoved): Unit
-	def onUnpersistRDD(unpersistRDD: SparkListenerUnpersistRDD): Unit
+		def onUnpersistRDD(unpersistRDD: SparkListenerUnpersistRDD): Unit
     def onApplicationStart(applicationStart: SparkListenerApplicationStart): Unit
     def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit
-	def onExecutorMetricsUpdate(executorMetricsUpdate: SparkListenerExecutorMetricsUpdate): Unit
+		def onExecutorMetricsUpdate(executorMetricsUpdate: SparkListenerExecutorMetricsUpdate): Unit
     def onStageExecutorMetrics(executorMetrics: SparkListenerStageExecutorMetrics): Unit
     def onExecutorAdded(executorAdded: SparkListenerExecutorAdded): Unit
     def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved): Unit
@@ -334,11 +335,11 @@ private[spark] trait SparkListenerInterface {
     
     @deprecated("use onNodeExcluded instead", "3.1.0")
   	def onNodeBlacklisted(nodeBlacklisted: SparkListenerNodeBlacklisted): Unit
-	def onNodeExcluded(nodeExcluded: SparkListenerNodeExcluded): Unit
+		def onNodeExcluded(nodeExcluded: SparkListenerNodeExcluded): Unit
     
     @deprecated("use onNodeUnexcluded instead", "3.1.0")
   	def onNodeUnblacklisted(nodeUnblacklisted: SparkListenerNodeUnblacklisted): Unit
-	def onNodeUnexcluded(nodeUnexcluded: SparkListenerNodeUnexcluded): Unit
+		def onNodeUnexcluded(nodeUnexcluded: SparkListenerNodeUnexcluded): Unit
     
     def onUnschedulableTaskSetAdded(unschedulableTaskSetAdded: SparkListenerUnschedulableTaskSetAdded): Unit
     def onUnschedulableTaskSetRemoved(unschedulableTaskSetRemoved: SparkListenerUnschedulableTaskSetRemoved): Unit

@@ -36,6 +36,8 @@
 `org.apache.spark.deploy.SparkSubmit`类定义如下：
 
 ```scala
+package org.apache.spark.deploy
+
 /**
  * Main gateway of launching a Spark application. 该类是启动Spark应用程序的主要入口。
  *
@@ -241,7 +243,7 @@ if (appArgs.verbose) {
 
 参数形如：
 
-```
+```shell
 java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit --master spark://127.0.0.1:7077 --deploy-mode cluster --class com.example.WordCount --executor-memory 4G ./user-jar-0.1.1.jar arg1 arg2
 ```
 
@@ -466,7 +468,6 @@ private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
           "Could not load YARN classes. This copy of Spark may not have been compiled with YARN support.")
       }
     }
-
     if (clusterManager == KUBERNETES) {
       args.master = Utils.checkAndGetK8sMasterUrl(args.master)
       // Make sure KUBERNETES is included in our build if we're trying to use it
@@ -503,7 +504,8 @@ private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
     val isStandAloneCluster = clusterManager == STANDALONE && deployMode == CLUSTER
     val isKubernetesCluster = clusterManager == KUBERNETES && deployMode == CLUSTER
     val isKubernetesClient = clusterManager == KUBERNETES && deployMode == CLIENT
-    val isKubernetesClusterModeDriver = isKubernetesClient && sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
+    val isKubernetesClusterModeDriver = isKubernetesClient && 
+        		sparkConf.getBoolean("spark.kubernetes.submitInDriver", false)
 
     if (!isMesosCluster && !isStandAloneCluster) {
       // Resolve maven dependencies if there are any and add classpath to jars. Add them to py-files
