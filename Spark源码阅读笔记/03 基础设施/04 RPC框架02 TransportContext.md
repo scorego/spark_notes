@@ -1,4 +1,4 @@
-`TransportContext`内部包含传输配置信息`TransportConf`和对收到的RPC消息进行处理的`RpcHandler`，可以用来创建RPC客户端工厂类 `TransportClientFactory`和RPC服务端`TransportServer`。
+`TransportContext`内部包含传输配置信息`TransportConf`和对收到的RPC消息进行处理的`RpcHandler`，可以用来创建RPC客户端工厂类 `TransportClientFactory`和RPC服务端`TransportServer`。`TransportContext`内部握有创建`TransPortClient`和`TransPortServer`的方法实现，但却属于最底层的RPC通讯设施，这是因为其成员变量`RPCHandler`是抽象的，并没有具体的消息处理。高层封装为`NettyRPCEnv`，并持有`TransportContext`引用，在`TransportContext`中传入`NettyRpcHandler`实体，来实现Netty通讯回调Handler处理。
 
 ```java
 package org.apache.spark.network;
@@ -128,7 +128,10 @@ object SparkTransportConf {
 `TransportClientFactory`是创建`TransportClient`的工厂类。`TransportContext`在创建`TransportClientFactory`的时候会传递两个参数：`TransportContext`和`TransportClientBootstrap`。
 
 ```java
-public TransportClientFactory createClientFactory() { return createClientFactory(new ArrayList<>()); }
+public TransportClientFactory createClientFactory() { 
+  return createClientFactory(new ArrayList<>()); 
+}
+
 public TransportClientFactory createClientFactory(List<TransportClientBootstrap> bootstraps) {
 	return new TransportClientFactory(this, bootstraps);
 }
@@ -138,7 +141,6 @@ public TransportClientFactory createClientFactory(List<TransportClientBootstrap>
 
 ```java
 package org.apache.spark.network.client;
-
 
 /**
  * Factory for creating {@link TransportClient}s by using createClient.
@@ -182,7 +184,9 @@ public class TransportClientFactory implements Closeable {
         // IO模式，NIO或者EPOLL
         IOMode ioMode = IOMode.valueOf(conf.ioMode());
         this.socketChannelClass = NettyUtils.getClientChannelClass(ioMode);
-        this.workerGroup = NettyUtils.createEventLoop(ioMode, conf.clientThreads(), conf.getModuleName() + "-client");
+        this.workerGroup = NettyUtils.createEventLoop(ioMode, 
+                                                      conf.clientThreads(), 
+                                                      conf.getModuleName() + "-client");
         if (conf.sharedByteBufAllocators()) {
             this.pooledAllocator = NettyUtils.getSharedPooledByteBufAllocator(
                 conf.preferDirectBufsForSharedByteBufAllocators(), false /* allowCache */);
@@ -240,12 +244,13 @@ public class SaslClientBootstrap implements TransportClientBootstrap
 `TransportClient`是RPC客户端，每个客户端实例只能和一个远端的RPC服务通信，如果一个组件想要和多个RPC服务通信，就需要持有多个客户端实例。`TransportClientFactory`创建客户端的代码如下：
 
 ```java
-public TransportClient createClient(String remoteHost, int remotePort) throws IOException, InterruptedException {
+public TransportClient createClient(String remoteHost, int remotePort) 
+  throws IOException, InterruptedException {
     return createClient(remoteHost, remotePort, false);
 }
 
 public TransportClient createClient(String remoteHost, int remotePort, boolean fastFail)
-    throws IOException, InterruptedException {
+  throws IOException, InterruptedException {
     //  先构建InetSocketAddress
     final InetSocketAddress unresolvedAddress = InetSocketAddress.createUnresolved(remoteHost, remotePort);
 
@@ -264,7 +269,8 @@ public TransportClient createClient(String remoteHost, int remotePort, boolean f
         // Make sure that the channel will not timeout by updating the last use time of the
         // handler. Then check that the client is still alive, in case it timed out before
         // this code was able to update things.
-        TransportChannelHandler handler = cachedClient.getChannel().pipeline().get(TransportChannelHandler.class);
+        TransportChannelHandler handler = 
+          	cachedClient.getChannel().pipeline().get(TransportChannelHandler.class);
         synchronized (handler) {
             handler.getResponseHandler().updateTimeOfLastRequest();
         }
@@ -437,8 +443,6 @@ public class TransportClient implements Closeable {
         return requestId;
     }
 
-
-
 }
 ```
 
@@ -457,9 +461,13 @@ public TransportServer createServer(String host, int port, List<TransportServerB
     return new TransportServer(this, host, port, rpcHandler, bootstraps);
 }
 
-public TransportServer createServer(List<TransportServerBootstrap> bootstraps) { return createServer(0, bootstraps); }
+public TransportServer createServer(List<TransportServerBootstrap> bootstraps) { 
+  	return createServer(0, bootstraps); 
+}
 
-public TransportServer createServer() { return createServer(0, new ArrayList<>()); }
+public TransportServer createServer() { 
+  	return createServer(0, new ArrayList<>()); 
+}
 ```
 
 `TransportServer`的构造器如下：
@@ -925,7 +933,7 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
 
 ### ③ `TransportResponseHandler`
 
-`TransportResponseHandler`用来处理``:
+`TransportResponseHandler`用来处理`ResponseMessage`:
 
 ```java
 package org.apache.spark.network.client;

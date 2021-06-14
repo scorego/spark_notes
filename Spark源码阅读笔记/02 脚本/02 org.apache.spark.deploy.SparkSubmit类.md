@@ -29,7 +29,6 @@
 > 	./user-jar-0.1.1.jar arg1 arg2
 > ```
 >
-> 
 
 ---
 
@@ -90,17 +89,13 @@ override def main(args: Array[String]): Unit = {
         override protected def parseArguments(args: Array[String]): SparkSubmitArguments = {
             new SparkSubmitArguments(args) {
                 override protected def logInfo(msg: => String): Unit = self.logInfo(msg)
-
                 override protected def logWarning(msg: => String): Unit = self.logWarning(msg)
-
                 override protected def logError(msg: => String): Unit = self.logError(msg)
             }
         }
 
         override protected def logInfo(msg: => String): Unit = printMessage(msg)
-
         override protected def logWarning(msg: => String): Unit = printMessage(s"Warning: $msg")
-
         override protected def logError(msg: => String): Unit = printMessage(s"Error: $msg")
 
         override def doSubmit(args: Array[String]): Unit = {
@@ -122,7 +117,7 @@ override def main(args: Array[String]): Unit = {
 
 # 二、`doSubmit()`
 
-`main()`方法新建`SparkSubmit`实例时重写了`doSubmit()`/`parseArguments()`等方法，重写`parseArguments`主要和日志打印有关，而重写`doSubmit`方法主要是多了捕捉异常并退出程序这一步骤。
+`main()`方法新建`SparkSubmit`实例时重写了`doSubmit()`/`parseArguments()`等方法。重写`parseArguments`主要和日志打印有关，而重写`doSubmit`方法主要是多了捕捉异常并退出程序这一步骤。
 
 ```scala
 override def doSubmit(args: Array[String]): Unit = {
@@ -174,60 +169,6 @@ protected def initializeLogIfNecessary(isInterpreter: Boolean,
     }
     false
 }
-
-private def initializeLogging(isInterpreter: Boolean, silent: Boolean): Unit = {
-    // Don't use a logger in here, as this is itself occurring during initialization of a logger
-    // If Log4j 1.2 is being used, but is not initialized, load a default properties file
-    if (Logging.isLog4j12()) {
-      val log4j12Initialized = LogManager.getRootLogger.getAllAppenders.hasMoreElements
-      // scalastyle:off println
-      if (!log4j12Initialized) {
-        Logging.defaultSparkLog4jConfig = true
-        val defaultLogProps = "org/apache/spark/log4j-defaults.properties"
-        Option(Utils.getSparkClassLoader.getResource(defaultLogProps)) match {
-          case Some(url) =>
-            PropertyConfigurator.configure(url)
-            if (!silent) {
-              System.err.println(s"Using Spark's default log4j profile: $defaultLogProps")
-            }
-          case None =>
-            System.err.println(s"Spark was unable to load $defaultLogProps")
-        }
-      }
-
-      val rootLogger = LogManager.getRootLogger()
-      if (Logging.defaultRootLevel == null) {
-        Logging.defaultRootLevel = rootLogger.getLevel()
-      }
-
-      if (isInterpreter) {
-        // Use the repl's main class to define the default log level when running the shell,
-        // overriding the root logger's config if they're different.
-        val replLogger = LogManager.getLogger(logName)
-        val replLevel = Option(replLogger.getLevel()).getOrElse(Level.WARN)
-        // Update the consoleAppender threshold to replLevel
-        if (replLevel != rootLogger.getEffectiveLevel()) {
-          if (!silent) {
-            System.err.printf("Setting default log level to \"%s\".\n", replLevel)
-            System.err.println("To adjust logging level use sc.setLogLevel(newLevel). " +
-              "For SparkR, use setLogLevel(newLevel).")
-          }
-          Logging.sparkShellThresholdLevel = replLevel
-          rootLogger.getAllAppenders().asScala.foreach {
-            case ca: ConsoleAppender =>
-              ca.addFilter(new SparkShellLoggingFilter())
-            case _ => // no-op
-          }
-        }
-      }
-      // scalastyle:on println
-    }
-    Logging.initialized = true
-
-    // Force a call into slf4j to initialize it. Avoids this happening from multiple threads
-    // and triggering this: http://mailman.qos.ch/pipermail/slf4j-dev/2010-April/002956.html
-    log
-}
 ```
 
 ## 2. 解析参数
@@ -236,9 +177,6 @@ private def initializeLogging(isInterpreter: Boolean, silent: Boolean): Unit = {
 
 ```scala
 val appArgs = parseArguments(args)
-if (appArgs.verbose) {
-    logInfo(appArgs.toString)
-}
 ```
 
 参数形如：
@@ -247,7 +185,7 @@ if (appArgs.verbose) {
 java -cp ... -Duser.home=/home/work  org.apache.spark.deploy.SparkSubmit --master spark://127.0.0.1:7077 --deploy-mode cluster --class com.example.WordCount --executor-memory 4G ./user-jar-0.1.1.jar arg1 arg2
 ```
 
-`parseArguments`这个方法是在实例化`SparkSubmit`类的时候被重写过的，不过也就是更改打印日志的一些细节，主要还是通过新建`org.apache.spark.deploy.SparkSubmitArguments`类实例来解析参数：
+`parseArguments`这个方法是在实例化`SparkSubmit`类的时候被重写过的，不过也就是更改打印日志的一些细节，其他逻辑并未改变，还是通过新建`org.apache.spark.deploy.SparkSubmitArguments`类实例来解析参数：
 
 ```scala
 override protected def parseArguments(args: Array[String]): SparkSubmitArguments = {
@@ -1022,9 +960,7 @@ private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
         childArgs ++= Array("--main-class", args.mainClass)
       }
       if (args.childArgs != null) {
-        args.childArgs.foreach { arg =>
-          childArgs += ("--arg", arg)
-        }
+        args.childArgs.foreach { arg => childArgs += ("--arg", arg) }
       }
       // Pass the proxyUser to the k8s app so it is possible to add it to the driver args
       if (args.proxyUser != null) {
@@ -1033,14 +969,10 @@ private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
     }
 
     // Load any properties specified through --conf and the default properties file
-    for ((k, v) <- args.sparkProperties) {
-      sparkConf.setIfMissing(k, v)
-    }
+    for ((k, v) <- args.sparkProperties) { sparkConf.setIfMissing(k, v) }
 
     // Ignore invalid spark.driver.host in cluster modes.
-    if (deployMode == CLUSTER) {
-      sparkConf.remove(DRIVER_HOST_ADDRESS)
-    }
+    if (deployMode == CLUSTER) { sparkConf.remove(DRIVER_HOST_ADDRESS) }
 
     // Resolve paths in certain spark properties
     val pathConfigs = Seq(
@@ -1052,9 +984,7 @@ private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
       "spark.yarn.dist.jars")
     pathConfigs.foreach { config =>
       // Replace old URIs with resolved URIs, if they exist
-      sparkConf.getOption(config).foreach { oldValue =>
-        sparkConf.set(config, Utils.resolveURIs(oldValue))
-      }
+      sparkConf.getOption(config).foreach { oldValue => sparkConf.set(config, Utils.resolveURIs(oldValue)) }
     }
 
     // Resolve and format python file paths properly before adding them to the PYTHONPATH.
@@ -1078,13 +1008,13 @@ private def runMain(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
 
 该方法返回的是4元组：
 
-- childArgs: Seq[String]
+- `childArgs: Seq[String]`
 
-- childClasspath: Seq[String]
+- `childClasspath: Seq[String]`
 
-- sparkConf: org.apache.spark.SparkConf
+- `sparkConf: org.apache.spark.SparkConf`
 
-- childMainClass: String
+- `childMainClass: String`
 
   在client模式下是`$args.mainClass`，yarn cluster模式下是`org.apache.spark.deploy.yarn.YarnClusterApplication`
 
@@ -1151,7 +1081,7 @@ private[deploy] class JavaMainApplication(klass: Class[_]) extends SparkApplicat
         val sysProps = conf.getAll.toMap
         sysProps.foreach { case (k, v) => sys.props(k) = v }
 
-        // 调用真正主类（--class的类)的main()
+        // 调用主类的main()
         mainMethod.invoke(null, args)
     }
 }

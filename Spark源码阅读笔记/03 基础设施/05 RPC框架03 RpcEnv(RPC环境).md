@@ -1,12 +1,36 @@
+> Spark在运行时Driver端和Executor端需要互相通信，那么这种通信是如何进行的？
+
+
+
 # 一、 总体结构
 
 Spark基于netty的新rpc框架借鉴了Akka中的设计，它是基于Actor模型，各个组件可以认为是一个个独立的实体，各个实体之间通过消息来进行通信。具体各个组件之间的关系如图：
 
 ![img](./pics/rpc_01_总体架构.png)
 
+- `RpcEnv`
+
+  `RpcEnv`为`RpcEndpoint`提供处理消息的环境。`RpcEnv`负责`RpcEndpoint`整个生命周期的管理，包括：注册endpoint，endpoint之间消息的路由，以及停止endpoint。
+
+  在driver和executor的代码中，生成`RpcEnv`的调用栈如下：
+
+  ```
+  Driver端：
+  SparkContext#createSparkEnv
+  ----> SparkEnv.createDriverEnv
+  --------> SparkEnv.create
+  --------------> RpcEnv#create
+  
+  Executor端：
+  CoarseGrainedExecutorBackend#run
+  ----> SparkEnv.createExecutorEnv
+  --------> SparkEnv.create
+  --------------> RpcEnv#create
+  ```
+
 - `RpcEndpoint`
 
-  表示一个个需要通信的个体（如master/worker/driver）。主要根据接收的消息来进行对应的处理。一个`RpcEndpoint`经历的过程依次是：构建->`onStart`->`receive`->`onStop`。
+  RPC端点，表示一个需要通信的个体(如`Master`/`Worker`/`Driver`)。内部根据不同端点的需求，设计不同的消息和不同的业务处理逻辑，如果需要发送（询问）则调用`Dispatcher`。一个`RpcEndpoint`经历的过程依次是：构建->`onStart`->`receive`->`onStop`。
 
   其中`onStart`在接收任务消息前调用，`receive()`和`receiveAndReply()`分别用来接收另一个`RpcEndpoint`（也可以是本身） `send()`和`ask()`过来的消息。
 
@@ -16,15 +40,19 @@ Spark基于netty的新rpc框架借鉴了Akka中的设计，它是基于Actor模�
 
 - `RpcAddress`
 
-  表示远程的`RpcEndpointRef`的地址，Host+Port
+  表示远程的`RpcEndpointRef`的地址，Host+Port。
 
--  `RpcEnv`
 
-  `RpcEnv`为`RpcEndpoint`提供处理消息的环境。`RpcEnv`负责`RpcEndpoint`整个生命周期的管理，包括：注册endpoint，endpoint之间消息的路由，以及停止endpoint。
+
+有关Rpc的代码在`org.apache.spark.rpc`包中，其中还有一个名为`netty`的子package。这些包中不同类型的对象主要可以分为三类，分别是：
+
+- 环境相关，主要包`RpcEnv`/`NettyRpcEnv`/`RpcEnvConfig`/`NettyRpcEnvFactory`
+- Server相关，主要是`RpcEndpoint`/`ThreadSafeRpcEndpoint`
+- Client相关，代表`RpcEndpoint`的引用，比如`RpcEndpointRef`/`NettyRpcEndpointRef`
 
 Rpc实现相关类之间的关系图如下:
 
-![img](./pics/rpc_02_类图.png)
+<img src="./pics/rpc_02_类图.png" alt="img" style="zoom:67%;" />
 
 核心要点如下：
 
@@ -32,9 +60,9 @@ Rpc实现相关类之间的关系图如下:
 
 - 通过工厂`RpcEnvFactory`来产生一个`RpcEnv`，而`NettyRpcEnvFactory`用来生成`NettyRpcEnv`的一个对象。
 
-- 当调用`RpcEnv`中的`setUpEndpoint`来注册一个endpoint到`RpcEnv`时，在`NettyRpcEnv`内部，回将该endpoint的名称与其本身的映射关系，`rpcEndpoint`与`rpcEndpointRef`之间映射关系保存在dispatcher对应的成员变量中。
+- 当调用`RpcEnv`中的`setUpEndpoint`来注册一个endpoint到`RpcEnv`时，在`NettyRpcEnv`内部，会将该endpoint的名称与其本身的映射关系，`rpcEndpoint`与`rpcEndpointRef`之间映射关系保存在dispatcher对应的成员变量中。
 
-# 二、`RpcEnv`
+# 二、`org.apache.spark.rpc.RpcEnv`
 
 ```scala
 package org.apache.spark.rpc
@@ -74,7 +102,6 @@ private[spark] object RpcEnv {
     }
 }
 
-
 /**
  * An RPC environment. [[RpcEndpoint]]s need to register itself with a name to [[RpcEnv]] to
  * receives messages. Then [[RpcEnv]] will process messages sent from [[RpcEndpointRef]] or remote
@@ -96,7 +123,8 @@ private[spark] abstract class RpcEnv(conf: SparkConf) {
 
     def asyncSetupEndpointRefByURI(uri: String): Future[RpcEndpointRef]
 
-    def setupEndpointRefByURI(uri: String): RpcEndpointRef = {defaultLookupTimeout.awaitResult(asyncSetupEndpointRefByURI(uri))}
+    def setupEndpointRefByURI(uri: String): RpcEndpointRef = 
+  								{defaultLookupTimeout.awaitResult(asyncSetupEndpointRefByURI(uri))}
 
 
     def setupEndpointRef(address: RpcAddress, endpointName: String): RpcEndpointRef = {
@@ -118,7 +146,7 @@ private[spark] abstract class RpcEnv(conf: SparkConf) {
 }
 ```
 
-`RpcEnv`表示RPC环境，只有唯一的子类`NettyRpcEnv`。
+`RpcEnv`表示RPC环境，只有唯一的实现`NettyRpcEnv`。
 
 ## 1. `RpcEndpoint`
 
@@ -207,8 +235,6 @@ private[spark] trait IsolatedRpcEndpoint extends RpcEndpoint
 
   一条消息精准投递一次。
 
-
-
 ```scala
 package org.apache.spark.rpc
 
@@ -257,7 +283,33 @@ private[spark] abstract class RpcEndpointRef(conf: SparkConf) extends Serializab
 
 # 二、`NettyRpcEnv`
 
-`NettyRpcEnv`是`RpcEnv`的唯一实现，创建`NettyRpcEnv`一般通过`NettyRpcEnvFactory`。在`SparkEnv`中，创建`RpcEnv`即默认创建`NettyRpcEnv`：
+`NettyRpcEnv`是`RpcEnv`的唯一实现，创建`NettyRpcEnv`一般通过`NettyRpcEnvFactory`。
+
+- `Dispatcher`
+
+  消息分发器，针对于RPC端点需要发送的消息或者从远程RPC接收到的消息，分发至对应的指令收件箱/发件箱。如果指令接收方是自己则存入收件箱；如果指令接收方为非自身端点，则放入发件箱。
+
+- `Inbox`
+
+  指令消息收件箱，一个本地端点对应一个收件箱。`Dispatcher`在每次向`Inbox`存入消息时，都将对应`EndpointData`加入内部Receiver Queue中，另外`Dispatcher`创建时会启动一个单独线程进行轮询Receiver Queue，进行收件箱消息消费。
+
+- `OutBox`
+
+  指令消息发件箱，一个远程端点对应一个发件箱。当消息放入`Outbox`后，紧接着将消息通过`TransportClient`发送出去。消息放入发件箱以及发送过程是在同一个线程中进行，这样做的主要原因是远程消息分为`RpcOutboxMessage`、`OneWayOutboxMessage`两种消息，而针对于需要应答的消息直接发送且需要得到结果进行处理。
+
+- `TransportClient`
+
+  Netty通信客户端，根据`OutBox`消息的receiver信息，请求对应远程`TransportServer`。
+
+- `TransportServer`
+
+  Netty通信服务端，一个RPC端点一个`TransportServer`，接受远程消息后调用`Dispatcher`分发消息至对应收发件箱。
+
+<img src="./pics/rpc_03_NettyRpcEnv结构图.jpeg" style="zoom:67%;" />
+
+
+
+在`SparkEnv`中，创建`RpcEnv`即默认创建`NettyRpcEnv`：
 
 ```scala
 systemName = if (isDriver) driverSystemName else executorSystemName
@@ -393,6 +445,24 @@ private[netty] class NettyRpcEnv(
 
     override def fileServer: RpcEnvFileServer = streamManager
     
+}
+```
+
+## 1. 消息调度器`Dispatcher`
+
+## 2. `NettyRpcHandler`
+
+## 3. 常用方法
+
+```scala
+// 获取RpcEndPoint的应用对象RpcEndPointRef
+override def endpointRef(endpoint: RpcEndpoint): RpcEndpointRef = {
+  dispatcher.getRpcEndpointRef(endpoint)
+}
+
+// 设置EndPoint
+override def setupEndpoint(name: String, endpoint: RpcEndpoint): RpcEndpointRef = {
+  dispatcher.registerRpcEndpoint(name, endpoint)
 }
 ```
 

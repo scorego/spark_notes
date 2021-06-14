@@ -81,8 +81,6 @@
 "${SPARK_HOME}"/bin/spark-submit --class org.apache.spark.repl.Main --name "Spark shell" --master spark://host:7077
 ```
 
-
-
 # 二、 spark-submit
 
 ## 1. 文件位置
@@ -113,40 +111,40 @@ Usage: spark-submit --status [submission ID] --master [spark://...]
 Usage: spark-submit run-example [options] example-class [example args]
 ```
 
-| Options                       | 含义                                                         | 备注                                                         |
-| :---------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| --master   MASTER_URL         | spark://host:port, mesos://host:port, yarn,                              k8s://https://host:port, or local | Default: local[*]                                            |
-| --deploy-mode   DEPLOY_MODE   | client  or cluster                                           | Default: client                                              |
-| --class    CLASS_NAME         | application的主类(for  Java/Scala apps)                      |                                                              |
-| --name   NAME                 | application  name                                            |                                                              |
-| --jars   JARS                 | 会放到driver和executor的classpath下的jar包                   | 逗号分隔                                                     |
-| --packages                    | 会放到driver和executor的classpath下的jar包(maven coordinates) | 逗号分隔；会首先搜索本地maven仓库，然后是maven central和additional remote(通过--repositories指定)；格式：groupId:artifactId:version |
-| --exclude-packages            | 在--packages中排除的jar包，可以避免依赖冲突                  | 格式：groupId:artifactId，逗号分隔                           |
-| --repositories                | additional remote  repositories                              | 逗号分隔                                                     |
-| --py-files    PY_FILES        | 会放到`PYTHONPATH`下的.zip/.egg/.py文件                      | 逗号分隔                                                     |
-| --files  FILES                | 会放到各个executor工作目录的文件                             | 逗号分隔；executor中，文件路径可以通过SparkFiles.get(fileName)得到 |
-| --archives   ARCHIVES         | arichives会被抽出到各个executor的工作目录                    | 逗号分隔                                                     |
-| --conf, -c      PROP=VALUE    | 任意的Spark配置                                              |                                                              |
-| --properties-file    FILE     | 额外配置文件的路径                                           | 如果未指定，会默认搜索conf/spark-defaults.conf               |
-| --driver-memory   MEM         | driver内存大小                                               | e.g. 1000M, 2G；Default: 1024M                               |
-| --driver-java-options         | Extra Java options to pass to the driver                     |                                                              |
-| --driver-library-path         | Extra library path entries to pass to the driver             |                                                              |
-| --driver-class-path           | Extra class path entries to pass to the driver               | 注意：通过--jars添加的jar包会自动添加到classpath中           |
-| --executor-memory    MEM      | executor内存大小                                             | e.g. 1000M, 2G；Default: 1G                                  |
-| --proxy-user   NAME           | User to impersonate when submitting the application          | This argument does not work with --principal / --keytab      |
-| --help, -h                    | Show this help message and exit                              |                                                              |
-| --verbose,  -v                | Print additional debug output                                |                                                              |
-| --version                     | Print the version of current Spark                           |                                                              |
-| --driver-cores NUM            | driver使用的core数                                           | Cluster deploy mode only；Default：1                         |
-| --supervise                   | If given, restarts the driver on failure                     | Spark standalone or Mesos with cluster deploy mode only      |
-| --kill    SUBMISSION_ID       | If given, kills the driver specified                         | Spark standalone, Mesos or K8s with cluster deploy mode only |
-| --status   SUBMISSION_ID      | If given, requests the status of the driver specified        | Spark standalone, Mesos or K8s with cluster deploy mode only |
-| --total-executor-cores    NUM | Total cores for all executors                                | Spark standalone, Mesos and Kubernetes only                  |
-| --executor-cores  NUM         | Number of cores used by each executor                        | Spark standalone, YARN and Kubernetes only；Default: 1 in  YARN and K8S modes, or all available cores on the worker in standalone mode |
-| --num-executors   NUM         | Number of executors to launch；If dynamic allocation is enabled, the initial number of executors will be at least NUM | Spark on YARN and Kubernetes only；Default:2                 |
-| --principal   PRINCIPAL       | Principal to be used to login to KDC                         | Spark on YARN and Kubernetes only                            |
-| --keytab    KEYTAB            | The full path to the file that contains the keytab for the principal specified above | Spark on YARN and Kubernetes only                            |
-| --queue   QUEUE_NAME          | The YARN queue to submit to                                  | Spark on YARN only；Default: default                         |
+| Options                        | 含义                                                         | 备注                                                         |
+| :----------------------------- | :----------------------------------------------------------- | ------------------------------------------------------------ |
+| `--master MASTER_URL`          | spark://host:port, mesos://host:port, yarn,                              k8s://https://host:port, or local | Default: local[*]                                            |
+| `--deploy-mode DEPLOY_MODE`    | client  or cluster                                           | Default: client                                              |
+| `--class CLASS_NAME`           | application的主类(for  Java/Scala apps)                      | 这个是Spark应用程序真正的主类。                              |
+| `--name NAME`                  | application  name                                            |                                                              |
+| `--jars JARS`                  | 会放到driver和executor的classpath下的jar包                   | 逗号分隔                                                     |
+| `--packages`                   | 会放到driver和executor的classpath下的jar包(maven coordinates) | 逗号分隔；会首先搜索本地maven仓库，然后是maven central和additional remote(通过--repositories指定)；格式：groupId:artifactId:version |
+| `--exclude-packages`           | 在--packages中排除的jar包，可以避免依赖冲突                  | 格式：groupId:artifactId，逗号分隔                           |
+| `--repositories`               | additional remote  repositories                              | 逗号分隔                                                     |
+| `--py-files    PY_FILES`       | 会放到`PYTHONPATH`下的.zip/.egg/.py文件                      | 逗号分隔                                                     |
+| `--files  FILES`               | 会放到各个executor工作目录的文件                             | 逗号分隔；executor中，文件路径可以通过SparkFiles.get(fileName)得到 |
+| `--archives ARCHIVES`          | arichives会被抽出到各个executor的工作目录                    | 逗号分隔                                                     |
+| `--conf`, `-c `     PROP=VALUE | 任意的Spark配置                                              |                                                              |
+| `--properties-file FILE`       | 额外配置文件的路径                                           | 如果未指定，会默认搜索conf/spark-defaults.conf               |
+| `--driver-memory MEM`          | driver内存大小                                               | e.g. 1000M, 2G；Default: 1024M                               |
+| `--driver-java-options`        | Extra Java options to pass to the driver                     |                                                              |
+| `--driver-library-path`        | Extra library path entries to pass to the driver             |                                                              |
+| `--driver-class-path`          | Extra class path entries to pass to the driver               | 注意：通过--jars添加的jar包会自动添加到classpath中           |
+| `--executor-memory MEM`        | executor内存大小                                             | e.g. 1000M, 2G；Default: 1G                                  |
+| `--proxy-user   NAME`          | User to impersonate when submitting the application          | This argument does not work with --principal / --keytab      |
+| `--help`, `-h`                 | Show this help message and exit                              |                                                              |
+| `--verbose`,  `-v`             | Print additional debug output                                |                                                              |
+| `--version`                    | Print the version of current Spark                           |                                                              |
+| `--driver-cores NUM`           | driver使用的core数                                           | Cluster deploy mode only；Default：1                         |
+| `--supervise`                  | If given, restarts the driver on failure                     | Spark standalone or Mesos with cluster deploy mode only      |
+| `--kill    SUBMISSION_ID`      | If given, kills the driver specified                         | Spark standalone, Mesos or K8s with cluster deploy mode only |
+| `--status   SUBMISSION_ID`     | If given, requests the status of the driver specified        | Spark standalone, Mesos or K8s with cluster deploy mode only |
+| `--total-executor-cores NUM`   | Total cores for all executors                                | Spark standalone, Mesos and Kubernetes only                  |
+| --executor-cores  NUM          | Number of cores used by each executor                        | Spark standalone, YARN and Kubernetes only；Default: 1 in  YARN and K8S modes, or all available cores on the worker in standalone mode |
+| `--num-executors NUM`          | Number of executors to launch；If dynamic allocation is enabled, the initial number of executors will be at least NUM | Spark on YARN and Kubernetes only；Default:2                 |
+| `--principal   PRINCIPAL`      | Principal to be used to login to KDC                         | Spark on YARN and Kubernetes only                            |
+| `--keytab    KEYTAB`           | The full path to the file that contains the keytab for the principal specified above | Spark on YARN and Kubernetes only                            |
+| `--queue QUEUE_NAME`           | The YARN queue to submit to                                  | Spark on YARN only；Default: default                         |
 
 ## 4. 使用举例
 
@@ -290,7 +288,7 @@ exec "${CMD[@]}"
 总的来说，`spark-class`就是导入Spark运行的环境变量，获取java命令路径、相关与Spark运行相关的jar包，获取命令行的参数等，并最终通过 `org.apache.spark.launcher.Main`这个类来启动Spark应用程序。大致步骤是：
 
 1. 检查`SPARK_HOME`变量
-2. 执行load-spark-env.sh文件
+2. 执行`load-spark-env.sh`文件
 3. 检查java执行路径
 4. 查找Spark jars
 5. 执行类`org.apache.spark.launcher.Main`来解析参数，并构建命令给`CMD`变量

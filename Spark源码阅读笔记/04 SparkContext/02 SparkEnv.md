@@ -1,4 +1,4 @@
-> Spark对任务的计算都依托于executor，所有的executor都有自己的Spark执行环境`SparkEnv`。`SparkEnv`提供了多种多样内部组件来实现不同的功能。在local模式下Driver会创建executor，local-cluster部署模式或者Standalone部署模式下Worker另起的`CoarseGrainedExecutorBackend`进程中也会创建executor，所以`SparkEnv`存在于Driver或者`CoarseGrainedExecutorBackend`进程中。
+> Spark对任务的计算都依托于executor，所有的executor都有自己的Spark执行环境`SparkEnv`。`SparkEnv`提供了多种多样内部组件来实现不同的功能。在local模式下Driver会创建executor，local-cluster部署模式或者`Standalone`部署模式下Worker另起的`CoarseGrainedExecutorBackend`进程中也会创建executor，所以`SparkEnv`存在于Driver或者`CoarseGrainedExecutorBackend`进程中。
 
 
 
@@ -32,9 +32,9 @@ class SparkEnv (
 object SparkEnv extends Logging {...}
 ```
 
-# 一、 内部组件
+# 一、 `SparkEnv#createDriverEnv`和`SparkEnv#createExecutorEnv`
 
-创建`SparkEnv`主要使用`SparkEnv`的`createDriverEnv()`和`createExecutorEnv()`方法，最终这些方法都会调用`create()`方法。
+创建`SparkEnv`主要使用`SparkEnv`的`createDriverEnv()`和`createExecutorEnv()`方法。在`SparkContext`中创建`SparkEnv`使用的是`org.apache.spark.SparkEnv#createDriverEnv`方法。
 
 ```scala
 /**
@@ -50,11 +50,9 @@ private[spark] def createDriverEnv(
     assert(conf.contains(DRIVER_HOST_ADDRESS), s"${DRIVER_HOST_ADDRESS.key} is not set on the driver!")
     assert(conf.contains(DRIVER_PORT), s"${DRIVER_PORT.key} is not set on the driver!")
     
-    // "spark.driver.bindAddress"
+    // "spark.driver.bindAddress"  "spark.driver.host"  "spark.driver.port"
     val bindAddress = conf.get(DRIVER_BIND_ADDRESS)
-    // "spark.driver.host"
     val advertiseAddress = conf.get(DRIVER_HOST_ADDRESS)
-    // "spark.driver.port"
     val port = conf.get(DRIVER_PORT)
     
     val ioEncryptionKey = if (conf.get(IO_ENCRYPTION_ENABLED)) {
@@ -62,7 +60,8 @@ private[spark] def createDriverEnv(
     } else {
         None
     }
-    
+    	
+  	// 实际调用的是org.apache.spark.SparkEnv#create方法
     create(
         conf,
         SparkContext.DRIVER_IDENTIFIER,
@@ -76,30 +75,45 @@ private[spark] def createDriverEnv(
         mockOutputCommitCoordinator = mockOutputCommitCoordinator
     )
 }
+
+private[spark] def createExecutorEnv(
+      conf: SparkConf,
+      executorId: String,
+      bindAddress: String,
+      hostname: String,
+      numCores: Int,
+      ioEncryptionKey: Option[Array[Byte]],
+      isLocal: Boolean): SparkEnv = {
+  val env = create(
+    conf,
+    executorId,
+    bindAddress,
+    hostname,
+    None,
+    isLocal,
+    numCores,
+    ioEncryptionKey
+  )
+  SparkEnv.set(env)
+  env
+}
 ```
 
-`SparkEnv`的内部组件有很多：
+# 二、 `org.apache.spark.SparkEnv#create`
 
-| 名称                      | 说明                                                         |
-| ------------------------- | ------------------------------------------------------------ |
-| SecurityManager           | 主要对账户、权限及身份认证进行设置与管理。                   |
-| RpcEnv                    | 各个组件之间通信的执行环境。                                 |
-| SerializerManager         | Spark 中很多对象在通用网络传输或者写入存储体系时，都需要序列化。 |
-| BroadcastManager          | 用于将配置信息和序列化后的RDD、Job以及ShuffleDependency等信息在本地存储。 |
-| MapOutputTracker          | 用于跟踪Map阶段任务的输出状态，此状态便于Reduce阶段任务获取地址及中间结果。 |
-| ShuffleManager            | 负责管理本地及远程的Block数据的shuffle操作。                 |
-| MemoryManager             | 一个抽象的内存管理器，用于执行内存如何在执行和存储之间共享。 |
-| NettyBlockTransferService | 使用Netty提供的异步事件驱动的网络应用框架，提供Web服务及客户端，获取远程节点上Block的集合。 |
-| BlockManagerMaster        | 负责对BlockManager的管理和协调。                             |
-| BlockManager              | 负责对Block的管理，管理整个Spark运行时的数据读写的，当然也包含数据存储本身，在这个基础之上进行读写操作。 |
-| MetricsSystem             | 一般是为了衡量系统的各种指标的度量系统。                     |
-| OutputCommitCoordinator   | 确定任务是否可以把输出提到到HFDS的管理者，使用先提交者胜的策略。 |
-
-# 二、 实例化过程
+`org.apache.spark.SparkEnv#create`代码如下：
 
 ```scala
-/**
-  * Helper method to create a SparkEnv for a driver or an executor.
+/* Driver端调用该方法时传入的参数如下：
+  * executorId: driver
+  * bindAddress: spark.driver.bindAddress参数指定，默认与spark.driver.host参数相同
+  * advertiseAddress: spark.driver.host参数指定，默认取driver主机名
+  * 
+  * Executor端调用该方法时传入的参数如下：
+  * conf: driverConf 从driver端获取的SparkConf对象
+  * executorId: Executor启动时的编号，例如--executor-id 93
+  * bindAddress: Executor所在主机名，例如--hostname hostname
+  * advertiseAddress: 和bindAddress相同
   */
 private def create(
         conf: SparkConf,
@@ -112,10 +126,9 @@ private def create(
         ioEncryptionKey: Option[Array[Byte]],
         listenerBus: LiveListenerBus = null,
         mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv = {
-
+		
+  	// Listener bus is only used on the driver
     val isDriver = executorId == SparkContext.DRIVER_IDENTIFIER
-
-    // Listener bus is only used on the driver
     if (isDriver) {
         assert(listenerBus != null, "Attempted to create driver SparkEnv with null listener bus!")
     }
@@ -124,10 +137,7 @@ private def create(
     val authSecretFileConf = if (isDriver) AUTH_SECRET_FILE_DRIVER else AUTH_SECRET_FILE_EXECUTOR
     // 组件：安全管理器
     val securityManager = new SecurityManager(conf, ioEncryptionKey, authSecretFileConf)
-    if (isDriver) {
-        securityManager.initializeAuth()
-    }
-
+    if (isDriver) { securityManager.initializeAuth() }
     ioEncryptionKey.foreach { _ =>
         if (!securityManager.isEncryptionEnabled()) {
             logWarning("I/O encryption enabled without RPC encryption: keys will be visible on the wire.")
@@ -144,11 +154,7 @@ private def create(
                                securityManager, 
                                numUsableCores, 
                                !isDriver)
-
-    // Figure out which port RpcEnv actually bound to in case the original port is 0 or occupied.
-    if (isDriver) {
-        conf.set(DRIVER_PORT, rpcEnv.address.port)
-    }
+    if (isDriver) { conf.set(DRIVER_PORT, rpcEnv.address.port) }
 
     // Create an instance of the class with the given name, possibly initializing it with our conf
     def instantiateClass[T](className: String): T = {
@@ -161,12 +167,11 @@ private def create(
             .asInstanceOf[T]
         } catch {
             case _: NoSuchMethodException =>
-            try {
-                cls.getConstructor(classOf[SparkConf]).newInstance(conf).asInstanceOf[T]
-            } catch {
-                case _: NoSuchMethodException =>
-                cls.getConstructor().newInstance().asInstanceOf[T]
-            }
+              try {
+                  cls.getConstructor(classOf[SparkConf]).newInstance(conf).asInstanceOf[T]
+              } catch {
+                  case _: NoSuchMethodException => cls.getConstructor().newInstance().asInstanceOf[T]
+              }
         }
     }
 
@@ -176,12 +181,12 @@ private def create(
         instantiateClass[T](conf.get(propertyName))
     }
     
+  	// 组件：序列化管理器
     val serializer = instantiateClassFromConf[Serializer](SERIALIZER)
     logDebug(s"Using serializer: ${serializer.getClass}")
-    
-	// 组件：序列化管理器
     val serializerManager = new SerializerManager(serializer, conf, ioEncryptionKey)
-
+		
+  	//
     val closureSerializer = new JavaSerializer(conf)
 
     def registerOrLookupEndpoint(name: String, endpointCreator: => RpcEndpoint):
@@ -203,9 +208,6 @@ private def create(
     } else {
         new MapOutputTrackerWorker(conf)
     }
-
-    // Have to assign trackerEndpoint after initialization as MapOutputTrackerEndpoint
-    // requires the MapOutputTracker itself
     mapOutputTracker.trackerEndpoint = 
     		registerOrLookupEndpoint(MapOutputTracker.ENDPOINT_NAME,
                                      new MapOutputTrackerMasterEndpoint(
@@ -287,14 +289,8 @@ private def create(
 	
     // 度量系统
     val metricsSystem = if (isDriver) {
-        // Don't start metrics system right now for Driver.
-        // We need to wait for the task scheduler to give us an app ID.
-        // Then we can start the metrics system.
         MetricsSystem.createMetricsSystem(MetricsSystemInstances.DRIVER, conf, securityManager)
     } else {
-        // We need to set the executor ID before the MetricsSystem is created because sources and
-        // sinks specified in the metrics configuration file will want to incorporate this executor's
-        // ID into the metrics they report.
         conf.set(EXECUTOR_ID, executorId)
         val ms = MetricsSystem.createMetricsSystem(MetricsSystemInstances.EXECUTOR, conf,
                                                    securityManager)
@@ -309,9 +305,9 @@ private def create(
     val outputCommitCoordinatorRef = 
     		registerOrLookupEndpoint("OutputCommitCoordinator",
                                      new OutputCommitCoordinatorEndpoint(rpcEnv, outputCommitCoordinator))
-    
     outputCommitCoordinator.coordinatorRef = Some(outputCommitCoordinatorRef)
-
+		
+  	// 用刚才的组件新建SparkEnv实例
     val envInstance = new SparkEnv(
         executorId,
         rpcEnv,
@@ -340,49 +336,68 @@ private def create(
 }
 ```
 
-# 三、 安全管理器`SecurityManager`
-
-`SecurityManager`负责安全相关事情。初始化安全管理器的代码如下：
+# 三、 `org.apache.spark.SparkEnv`内部组件
 
 ```scala
-// "spark.authenticate.secret.driver.file" else "spark.authenticate.secret.executor.file"
-val authSecretFileConf = if (isDriver) AUTH_SECRET_FILE_DRIVER else AUTH_SECRET_FILE_EXECUTOR
-val securityManager = new SecurityManager(conf, ioEncryptionKey, authSecretFileConf)
-if (isDriver) {
-    securityManager.initializeAuth()
-}
+package org.apache.spark
 
-ioEncryptionKey.foreach { _ =>
-    if (!securityManager.isEncryptionEnabled()) {
-        logWarning("I/O encryption enabled without RPC encryption: keys will be visible on the wire.")
-    }
-}
-```
-
-```scala
 /**
- * Spark class responsible for security.
- *
- * In general this class should be instantiated by the SparkEnv and most components
- * should access it from that. There are some cases where the SparkEnv hasn't been
- * initialized yet and this class must be instantiated directly.
- *
- * This class implements all of the configuration related to security features described
- * in the "Security" document. Please refer to that document for specific features implemented
- * here.
+ * :: DeveloperApi ::
+ * Holds all the runtime environment objects for a running Spark instance (either master or worker),
+ * including the serializer, RpcEnv, block manager, map output tracker, etc. Currently
+ * Spark code finds the SparkEnv through a global variable, so all the threads can access the same
+ * SparkEnv. It can be accessed by SparkEnv.get (e.g. after creating a SparkContext).
  */
-private[spark] class SecurityManager(
-    sparkConf: SparkConf,
-    val ioEncryptionKey: Option[Array[Byte]] = None,
-    authSecretFileConf: ConfigEntry[Option[String]] = AUTH_SECRET_FILE)
-  extends Logging with SecretKeyHolder {...}
+@DeveloperApi
+class SparkEnv (
+    val executorId: String,
+    private[spark] val rpcEnv: RpcEnv,
+    val serializer: Serializer,
+    val closureSerializer: Serializer,
+    val serializerManager: SerializerManager,
+    val mapOutputTracker: MapOutputTracker,
+    val shuffleManager: ShuffleManager,
+    val broadcastManager: BroadcastManager,
+    val blockManager: BlockManager,
+    val securityManager: SecurityManager,
+    val metricsSystem: MetricsSystem,
+    val memoryManager: MemoryManager,
+    val outputCommitCoordinator: OutputCommitCoordinator,
+    val conf: SparkConf) extends Logging { 
+  
+  @volatile private[spark] var isStopped = false
+  
+  private val pythonWorkers = mutable.HashMap[(String, Map[String, String]), PythonWorkerFactory]()
 
-private[spark] object SecurityManager {...}
+  private[spark] val hadoopJobMetadata = CacheBuilder.newBuilder().softValues().build[String, AnyRef]().asMap()
+
+  private[spark] var driverTmpDir: Option[String] = None
+  
+  ... 
+}
+    
+object SparkEnv extends Logging { ... }
 ```
 
-# 四、 RPC环境`RpcEnv`
+`SparkEnv`的内部组件：
 
-`RpcEnv`是Spark 2.x.x出现的新组件，目的是替换之前的Akka。
+| 名称                                               | 说明                                                         |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| `securityManager: SecurityManager`                 | 安全管理器，主要对账户、权限及身份认证进行设置与管理。       |
+| `rpcEnv: RpcEnv`                                   | 各个组件之间通信的执行环境。                                 |
+| `serializerManager: SerializerManager`             | Spark 中很多对象在通用网络传输或者写入存储体系时，都需要序列化。 |
+| `closureSerializer: Serializer`                    |                                                              |
+| `broadcastManager: BroadcastManager`               | 用于将配置信息和序列化后的RDD、Job以及ShuffleDependency等信息在本地存储。 |
+| `mapOutputTracker: MapOutputTracker`               | 用于跟踪Map阶段任务的输出状态，此状态便于Reduce阶段任务获取地址及中间结果。 |
+| `shuffleManager: ShuffleManager`                   | 负责管理本地及远程的Block数据的shuffle操作。                 |
+| `memoryManager: MemoryManager`                     | 一个抽象的内存管理器，用于执行内存如何在执行和存储之间共享。 |
+| `blockManager: BlockManager`                       | 负责对Block的管理，管理整个Spark运行时的数据读写的，当然也包含数据存储本身，在这个基础之上进行读写操作。 |
+| `metricsSystem: MetricsSystem`                     | 一般是为了衡量系统的各种指标的度量系统。                     |
+| `outputCommitCoordinator: OutputCommitCoordinator` | 确定任务是否可以把输出提到到HFDS的管理者，使用先提交者胜的策略。 |
+
+## 1. 初始化RPC环境`RpcEnv`
+
+`RpcEnv`是Spark 2.x.x出现的新组件，目的是替换之前的Akka。`SparkEnv`中初始化`RpcEnv`的代码如下：
 
 ```scala
 // "sparkDriver" or "sparkExecutor"
@@ -395,11 +410,7 @@ val rpcEnv = RpcEnv.create(systemName,
                            securityManager, 
                            numUsableCores, 
                            !isDriver)
-
-// Figure out which port RpcEnv actually bound to in case the original port is 0 or occupied.
-if (isDriver) {
-    conf.set(DRIVER_PORT, rpcEnv.address.port)
-}
+if (isDriver) { conf.set(DRIVER_PORT, rpcEnv.address.port) }
 ```
 
 `RpcEnv.create()`方法代码如下：
@@ -426,9 +437,9 @@ def create(
 }
 ```
 
-# 五、 序列化管理器`SerializerManager`
+## 2. 初始化序列化组件
 
-`SparkEnv`中有两个序列化的组件，分别是，创建它们的代码如下：
+`SparkEnv`中有两个序列化的组件，分别是`serializerManager`和`closureSerializer`，创建它们的代码如下：
 
 ```scala
 def instantiateClassFromConf[T](propertyName: ConfigEntry[String]): T = {
@@ -447,18 +458,17 @@ def instantiateClass[T](className: String): T = {
             try {
                 cls.getConstructor(classOf[SparkConf]).newInstance(conf).asInstanceOf[T]
             } catch {
-                case _: NoSuchMethodException =>
-                cls.getConstructor().newInstance().asInstanceOf[T]
+                case _: NoSuchMethodException => cls.getConstructor().newInstance().asInstanceOf[T]
             }
     }
 }
 
 // SERIALIZER: "spark.serializer"
 val serializer = instantiateClassFromConf[Serializer](SERIALIZER)
-logDebug(s"Using serializer: ${serializer.getClass}")
 
 val serializerManager = new SerializerManager(serializer, conf, ioEncryptionKey)
 
 val closureSerializer = new JavaSerializer(conf)
 ```
 
+序列化管理器`SerializerManager`给各种Spark组件提供序列化、压缩及加密的服务。

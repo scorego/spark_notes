@@ -43,9 +43,9 @@ private val activeContext: AtomicReference[SparkContext] = new AtomicReference[S
 // SparkConf
 private var _conf: SparkConf = _
 
-// 事件日志的路径。当spark.eventLog.enabled属性为true时启用，可以通过当spark.eventLog.dir指定，默认为/tmp/spark-events
+// 事件日志的路径。可以通过当spark.eventLog.dir指定，默认为/tmp/spark-events
 private var _eventLogDir: Option[URI] = None
-// 事件日志的压缩算法。当spark.eventLog.enabled和spark.eventLog.compress属性都为true时启用。可以通过spark.eventLog.compression.codec指定，支持lzf、snappy、lz4、ztsd四种
+// 事件日志的压缩算法。可以通过spark.eventLog.compression.codec指定，支持lzf、snappy、lz4、ztsd四种
 private var _eventLogCodec: Option[String] = None
 
 // 事件总线。可以接受各个使用方的事件，并通过异步方式对事件进行匹配后调用SparkListener的不同方法。
@@ -57,7 +57,7 @@ private var _env: SparkEnv = _
 // 提供对Job、Stage等的监控信息。这是个低级的API，只能提供非常脆弱的一致性机制
 private var _statusTracker: SparkStatusTracker = _
 
-// 利用SparkStatusTracker的API，在控制台展示Stage的进度。由于SparkStatusTracker存在一致性问题，所以控制台的显示往往有一定的时延
+// 利用SparkStatusTracker的API，在控制台展示Stage的进度。由于SparkStatusTracker存在一致性问题，所以控制台显示往往有一定的时延
 private var _progressBar: Option[ConsoleProgressBar] = None
 
 // SparkUI，Spark的用户界面。SparkUI将从各个SparkListener中读取数据并显示到Web界面
@@ -117,7 +117,6 @@ private var _plugins: Option[PluginContainer] = None
 // Manager of resource profiles
 private var _resourceProfileManager: ResourceProfileManager = _
 
-
 private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala
 private[spark] val addedArchives = new ConcurrentHashMap[String, Long]().asScala
 private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala
@@ -144,14 +143,14 @@ private[spark] var checkpointDir: Option[String] = None
 // 一个JVM只能有一个激活的SparkContext
 def getOrCreate(config: SparkConf): SparkContext = {
     SPARK_CONTEXT_CONSTRUCTOR_LOCK.synchronized {
-      if (activeContext.get() == null) {
-        setActiveContext(new SparkContext(config))
-      } else {
-        if (config.getAll.nonEmpty) {
-          logWarning("Using an existing SparkContext; some configuration may not take effect.")
+        if (activeContext.get() == null) {
+            setActiveContext(new SparkContext(config))
+        } else {
+            if (config.getAll.nonEmpty) {
+                logWarning("Using an existing SparkContext; some configuration may not take effect.")
+            }
         }
-      }
-      activeContext.get()
+        activeContext.get()
     }
 }
 ```
@@ -200,11 +199,10 @@ if (!config.get(EXECUTOR_ALLOW_SPARK_CONTEXT)) {	// "spark.executor.allowSparkCo
     SparkContext.assertOnDriver()
 }
 
-// 防止多个SparkContext同时处于active状态
+// 防止多个SparkContext同时处于active状态，这里标记已经有SparkContext开始构建
 SparkContext.markPartiallyConstructed(this)
 
 val startTime = System.currentTimeMillis()
-
 private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)
 
 logInfo(s"Running Spark version $SPARK_VERSION")
@@ -263,16 +261,21 @@ protected[spark] val localProperties = new InheritableThreadLocal[Properties] {
 }
 
 try {
+  	// clone SparkConf并进行一些验证
     _conf = config.clone()
     _conf.validateSettings()
     _conf.set("spark.app.startTime", startTime.toString)
+    if (!_conf.contains("spark.master")) { 
+      throw new SparkException("A master URL must be set in your configuration")
+    }
+    if (!_conf.contains("spark.app.name")) { 
+      throw new SparkException("An application name must be set in your configuration")
+    }
 
-    if (!_conf.contains("spark.master")) { throw new SparkException("A master URL must be set in your configuration") }
-    if (!_conf.contains("spark.app.name")) { throw new SparkException("An application name must be set in your configuration") }
-
-    // 新建DriverLogger
+    // 新建DriverLogger，只有client模式才会新建
     _driverLogger = DriverLogger(_conf)
-
+	
+  	// 
     val resourcesFileOpt = conf.get(DRIVER_RESOURCES_FILE)	// "spark.driver.resourcesFile"
     _resources = getOrDiscoverAllResources(_conf, SPARK_DRIVER_PREFIX, resourcesFileOpt)
     logResourceInfo(SPARK_DRIVER_PREFIX, _resources)
@@ -282,29 +285,29 @@ try {
     // System property spark.yarn.app.id must be set if user code ran by AM on a YARN cluster
     if (master == "yarn" && deployMode == "cluster" && !_conf.contains("spark.yarn.app.id")) {
         throw new SparkException("Detected yarn cluster mode, but isn't running on a cluster. " +
-                                 "Deployment to YARN is not supported directly by SparkContext. Please use spark-submit.")
+            "Deployment to YARN is not supported directly by SparkContext. Please use spark-submit.")
     }
 
     if (_conf.getBoolean("spark.logConf", false)) { logInfo("Spark configuration:\n" + _conf.toDebugString) }
 
-    // Set Spark driver host and port system properties. This explicitly sets the configuration
-    // instead of relying on the default value of the config constant.
+    // 进行一些值的默认设置
     _conf.set(DRIVER_HOST_ADDRESS, _conf.get(DRIVER_HOST_ADDRESS))
     _conf.setIfMissing(DRIVER_PORT, 0)
-
     _conf.set(EXECUTOR_ID, SparkContext.DRIVER_IDENTIFIER)	// 将"spark.executor.id"设为"driver"
-
+		
+  	// 设置jars、files、archives
     _jars = Utils.getUserJars(_conf)  // "spark.jars"
-    _files = _conf.getOption(FILES.key).map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten  // "spark.files"
+    _files = _conf.getOption(FILES.key).map(_.split(","))
+  							.map(_.filter(_.nonEmpty)).toSeq.flatten  // "spark.files"
     _archives = _conf.getOption(ARCHIVES.key).map(Utils.stringToSeq).toSeq.flatten	 // "spark.archives"
 
+  	// 事件相关
     _eventLogDir = if (isEventLogEnabled) {	// "spark.eventLog.enabled"
             val unresolvedDir = conf.get(EVENT_LOG_DIR).stripSuffix("/")	// "spark.eventLog.dir"
             Some(Utils.resolveURI(unresolvedDir))
         } else {
             None
         }
-
     _eventLogCodec = {
         val compress = _conf.get(EVENT_LOG_COMPRESS)	// "spark.eventLog.compress"
         if (compress && isEventLogEnabled) {		// "spark.eventLog.enabled"
@@ -317,14 +320,16 @@ try {
 
     // 新建事件总线
     _listenerBus = new LiveListenerBus(_conf)
+  
+ 		// 
     _resourceProfileManager = new ResourceProfileManager(_conf, _listenerBus)
 
-    // Initialize the app status store and listener before SparkEnv is created so that it gets all events.
+    // status事件监听器
     val appStatusSource = AppStatusSource.createSource(conf)
     _statusStore = AppStatusStore.createLiveStore(conf, appStatusSource)
     listenerBus.addToStatusQueue(_statusStore.listener.get)
 
-    // 新建SparkEnv(cache, map output tracker, etc)
+    // 新建SparkEnv
     _env = createSparkEnv(_conf, isLocal, listenerBus)
     SparkEnv.set(_env)
 
@@ -333,15 +338,18 @@ try {
         val replUri = _env.rpcEnv.fileServer.addDirectory("/classes", new File(path))
         _conf.set("spark.repl.class.uri", replUri)
     }
-
+		
+  	//
     _statusTracker = new SparkStatusTracker(this, _statusStore)
-
+		
+  	// 
     _progressBar = if (_conf.get(UI_SHOW_CONSOLE_PROGRESS)) {
             Some(new ConsoleProgressBar(this))
         } else {
             None
         }
-
+		
+  	//
     _ui = if (conf.get(UI_ENABLED)) {
             Some(SparkUI.create(Some(this), _statusStore, _conf, _env.securityManager, appName, "", startTime))
         } else {
@@ -349,35 +357,24 @@ try {
             None
         }
     
-    // Bind the UI before starting the task scheduler to communicate the bound port to the cluster manager properly
     _ui.foreach(_.bind())
 
     _hadoopConfiguration = SparkHadoopUtil.get.newConfiguration(_conf)
-    // Performance optimization: this dummy call to .size() triggers eager evaluation of
-    // Configuration's internal  `properties` field, guaranteeing that it will be computed and
-    // cached before SessionState.newHadoopConf() uses `sc.hadoopConfiguration` to create
-    // a new per-session Configuration. If `properties` has not been computed by that time
-    // then each newly-created Configuration will perform its own expensive IO and XML
-    // parsing to load configuration defaults and populate its own properties. By ensuring
-    // that we've pre-computed the parent's properties, the child Configuration will simply
-    // clone the parent's properties.
     _hadoopConfiguration.size()
 
-    // Add each JAR given through the constructor
+    // 
     if (jars != null) {
         jars.foreach(jar => addJar(jar, true))
         if (addedJars.nonEmpty) {
             _conf.set("spark.app.initial.jar.urls", addedJars.keys.toSeq.mkString(","))
         }
     }
-
     if (files != null) {
         files.foreach(file => addFile(file, false, true))
         if (addedFiles.nonEmpty) {
             _conf.set("spark.app.initial.file.urls", addedFiles.keys.toSeq.mkString(","))
         }
     }
-
     if (archives != null) {
         archives.foreach(file => addFile(file, false, true, isArchive = true))
         if (addedArchives.nonEmpty) {
@@ -385,6 +382,7 @@ try {
         }
     }
 
+  	// 
     _executorMemory = _conf.getOption(EXECUTOR_MEMORY.key)			// "spark.executor.memory"
         .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))		// 
         .orElse(Option(System.getenv("SPARK_MEM"))
@@ -394,12 +392,14 @@ try {
 
     // Convert java options to env vars as a work around since we can't set env vars directly in sbt.
     for { (envKey, propKey) <- Seq(("SPARK_TESTING", IS_TESTING.key))
-         value <- Option(System.getenv(envKey)).orElse(Option(System.getProperty(propKey)))} { executorEnvs(envKey) = value }
+         value <- Option(System.getenv(envKey))
+         						.orElse(Option(System.getProperty(propKey)))} { executorEnvs(envKey) = value }
     Option(System.getenv("SPARK_PREPEND_CLASSES")).foreach { v => executorEnvs("SPARK_PREPEND_CLASSES") = v }
     executorEnvs("SPARK_EXECUTOR_MEMORY") = executorMemory + "m"
     executorEnvs ++= _conf.getExecutorEnv
     executorEnvs("SPARK_USER") = sparkUser
-
+		
+  	//
     _shuffleDriverComponents = ShuffleDataIOUtils.loadShuffleDataIO(config).driver()
     _shuffleDriverComponents.initializeApplication().asScala.foreach { case (k, v) =>
         _conf.set(ShuffleDataIOUtils.SHUFFLE_SPARK_CONF_PREFIX + k, v)
@@ -418,7 +418,8 @@ try {
     _taskScheduler = ts
     _dagScheduler = new DAGScheduler(this)
     _heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
-
+		
+  	//
     val _executorMetricsSource = if (_conf.get(METRICS_EXECUTORMETRICS_SOURCE_ENABLED)) {
             Some(new ExecutorMetricsSource)
         } else {
@@ -472,7 +473,8 @@ try {
             None
         }
     _cleaner.foreach(_.start())
-
+		
+  	//
     val dynamicAllocationEnabled = Utils.isDynamicAllocationEnabled(_conf)
     _executorAllocationManager = if (dynamicAllocationEnabled) {
             schedulerBackend match {
@@ -480,7 +482,7 @@ try {
                     Some(new ExecutorAllocationManager(schedulerBackend.asInstanceOf[ExecutorAllocationClient],
                                                        listenerBus, 
                                                        _conf,
-                        							   cleaner = cleaner, 
+                        							   							 cleaner = cleaner, 
                                                        resourceProfileManager = resourceProfileManager))
                 case _ => None
             }
@@ -500,35 +502,39 @@ try {
     _env.metricsSystem.registerSource(new BlockManagerSource(_env.blockManager))
     _env.metricsSystem.registerSource(new JVMCPUSource())
     _executorMetricsSource.foreach(_.register(_env.metricsSystem))
-    _executorAllocationManager.foreach { e => _env.metricsSystem.registerSource(e.executorAllocationManagerSource) }
+    _executorAllocationManager.foreach { e => 
+      					_env.metricsSystem.registerSource(e.executorAllocationManagerSource) }
     appStatusSource.foreach(_env.metricsSystem.registerSource(_))
     _plugins.foreach(_.registerMetrics(applicationId))
     // Make sure the context is stopped if the user forgets about it. This avoids leaving
     // unfinished event logs around after the JVM exits cleanly. It doesn't help if the JVM is killed, though.
     logDebug("Adding shutdown hook") // force eager creation of logger
-    _shutdownHookRef = ShutdownHookManager.addShutdownHook(ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY) { () => 
-            logInfo("Invoking stop() from shutdown hook")
-            try {
-                stop()
-            } catch {
-                case e: Throwable => logWarning("Ignoring Exception while stopping SparkContext from shutdown hook", e)
-            }
+    _shutdownHookRef = ShutdownHookManager.addShutdownHook(
+      		ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY) { () => 
+              logInfo("Invoking stop() from shutdown hook")
+              try {
+                  stop()
+              } catch {
+                  case e: Throwable => 
+                      logWarning("Ignoring Exception while stopping SparkContext from shutdown hook", e)
+              }
     }
 } catch {
-    case NonFatal(e) => logError("Error initializing SparkContext.", e)
-    try {
-        stop()
-    } catch {
-        case NonFatal(inner) => logError("Error stopping SparkContext after init error.", inner)
-    } finally {
-        throw e
-    }
+    case NonFatal(e) =>
+  			logError("Error initializing SparkContext.", e)
+        try {
+            stop()
+        } catch {
+            case NonFatal(inner) => logError("Error stopping SparkContext after init error.", inner)
+        } finally {
+            throw e
+        }
 }
 ```
 
 ## 1. 创建`SparkEnv`
 
-`SparkEnv`为executor提供运行环境，driver中也会包含`SparkEnv`吗，这是为了保证local模式下任务的执行。`SparkContext`中初始`SparkEnv`的代码如下：
+`SparkEnv`为executor提供运行环境，driver中也会包含`SparkEnv`，这是为了保证local模式下任务的执行。`SparkContext`中初始`SparkEnv`的代码如下：
 
 ```scala
 def isLocal: Boolean = Utils.isLocalMaster(_conf)
@@ -594,7 +600,7 @@ private[spark] def createDriverEnv(
 
 ## 2. 创建`SparkUI`
 
-Spark提供了Web页面来浏览监控数据，而且Master、Worker、Driver根据自身功能提供了不同内容的Web监控页面，它们都使用了统一的Web框架WebUI。Master、Worker、Driver分别使用MasterWebUI、WorkerWebUI、SparkUI，他们都继承自WebUI。此外，YARN或Mesos模式下还有WebUI的另一个扩展实现HistoryServer。
+Spark提供了Web页面来浏览监控数据，而且Master、Worker、Driver根据自身功能提供了不同内容的Web监控页面，它们都使用了统一的Web框架`WebUI`。Master、Worker、Driver分别使用`MasterWebUI`、`WorkerWebUI`、`SparkUI`，他们都继承自`WebUI`。此外，YARN或Mesos模式下还有WebUI的另一个扩展实现`HistoryServer`。
 
 ```scala
 _ui =
@@ -756,7 +762,7 @@ private def createTaskScheduler(
 }
 ```
 
-根据不同的master地址，创建任务调度器的方式也不同。
+根据不同的部署模式，创建任务调度器的方式也不同。
 
 ## 5. 初始化块管理器BlockManager
 
@@ -904,8 +910,6 @@ private def setupAndStartListenerBus(): Unit = {
 ```
 
 ## 11. 读取用户指定的文件
-
-
 
 ```scala
 // "spark.jars"
