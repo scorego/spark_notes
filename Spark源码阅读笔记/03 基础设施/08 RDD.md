@@ -1,4 +1,4 @@
-> RDD，全称Resilient Distributed Datasets，弹性分布式数据集，是Spark中最基本的数据抽象，代表可并行操作元素的不可变分区集合。RDD的设计思想可参考论文：http://people.csail.mit.edu/matei/papers/2012/nsdi_spark.pdf
+> RDD(Resilient Distributed Datasets，弹性分布式数据集)，是Spark中最基本的数据抽象，代表可并行操作元素的不可变分区集合。RDD的设计思想可参考论文：http://people.csail.mit.edu/matei/papers/2012/nsdi_spark.pdf
 
 
 
@@ -123,11 +123,15 @@ RDD由5个主要属性：
 
 - A list of partitions
 
-  对于RDD来说，每个partition都会被一个计算任务处理，会决定并行计算的粒度。用户可以在创建RDD时指定RDD的分片个数，如果没有指定，那么就会采用默认值（程序所分配到的CPU Core的数目）。
+  一组数据分区的list。对于RDD来说，每个partition都会被一个计算任务处理，会决定并行计算的粒度。用户可以在创建RDD时指定RDD的分片个数，如果没有指定，那么就会采用默认值（程序所分配到的CPU Core的数目）。
 
 - A function for computing each split
 
+  计算每个分区的函数。
+
 - A list of dependencies on other RDDs
+
+  依赖关系。
 
 - Optionally, a Partitioner for key-value RDDs
 
@@ -139,9 +143,101 @@ RDD由5个主要属性：
 
 RDD可以由以下几种方式得来：
 
-- 读取文件生成
+- 稳定的存储创建
 - 通过并行化方式创建
 - 由其他RDD转化而来
+
+
+
+# 一、 依赖
+
+<img src="./pics/rdd_01_依赖关系.png" alt="img" style="zoom:50%;" />
+
+RDD的依赖关系有两种：窄依赖(narrow dependency)和宽依赖(wide dependency)。窄依赖是指一个父RDD的partition最多被一个子RDD的一个partition使用；宽依赖指多个子RDD的partition会依赖同一个父RDD的partition。所有依赖都是继承`org.apache.spark.Dependency[T]`抽象类，源码如下：
+
+```scala
+@DeveloperApi
+abstract class Dependency[T] extends Serializable {
+  def rdd: RDD[T]
+}
+
+@DeveloperApi
+abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
+  def getParents(partitionId: Int): Seq[Int]
+  
+  override def rdd: RDD[T] = _rdd
+}
+
+@DeveloperApi
+class OneToOneDependency[T](rdd: RDD[T]) extends NarrowDependency[T](rdd) {
+  override def getParents(partitionId: Int): List[Int] = List(partitionId)
+}
+
+@DeveloperApi
+class RangeDependency[T](rdd: RDD[T], inStart: Int, outStart: Int, length: Int)
+      extends NarrowDependency[T](rdd) {
+
+  override def getParents(partitionId: Int): List[Int] = {
+    if (partitionId >= outStart && partitionId < outStart + length) {
+      List(partitionId - outStart + inStart)
+    } else {
+      Nil
+    }
+  }
+        
+}
+
+@DeveloperApi
+class ShuffleDependency[K: ClassTag, V: ClassTag, C: ClassTag](
+    @transient private val _rdd: RDD[_ <: Product2[K, V]],
+    val partitioner: Partitioner,
+    val serializer: Serializer = SparkEnv.get.serializer,
+    val keyOrdering: Option[Ordering[K]] = None,
+    val aggregator: Option[Aggregator[K, V, C]] = None,
+    val mapSideCombine: Boolean = false,
+    val shuffleWriterProcessor: ShuffleWriteProcessor = new ShuffleWriteProcessor)
+  extends Dependency[Product2[K, V]] {
+
+  if (mapSideCombine) {
+    require(aggregator.isDefined, "Map-side combine without Aggregator specified!")
+  }
+  override def rdd: RDD[Product2[K, V]] = _rdd.asInstanceOf[RDD[Product2[K, V]]]
+
+  private[spark] val keyClassName: String = reflect.classTag[K].runtimeClass.getName
+  private[spark] val valueClassName: String = reflect.classTag[V].runtimeClass.getName
+    
+  private[spark] val combinerClassName: Option[String] = Option(reflect.classTag[C]).map(_.runtimeClass.getName)
+
+  val shuffleId: Int = _rdd.context.newShuffleId()
+
+  val shuffleHandle: ShuffleHandle = _rdd.context.env.shuffleManager.registerShuffle(shuffleId, this)
+
+  private[spark] var mergerLocs: Seq[BlockManagerId] = Nil
+
+  def setMergerLocs(mergerLocs: Seq[BlockManagerId]): Unit = {
+    if (mergerLocs != null) {
+      this.mergerLocs = mergerLocs
+    }
+  }
+
+  def getMergerLocs: Seq[BlockManagerId] = mergerLocs
+
+  _rdd.sparkContext.cleaner.foreach(_.registerShuffleForCleanup(this))
+  _rdd.sparkContext.shuffleDriverComponents.registerShuffle(shuffleId)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
 
 一些重要的继承类：
 
