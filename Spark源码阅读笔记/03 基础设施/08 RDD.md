@@ -13,8 +13,11 @@ package org.apache.spark.rdd
  */
 abstract class RDD[T: ClassTag](
     @transient private var _sc: SparkContext,
-  	// 存储当前RDD的依赖
+    // 存储当前RDD的依赖
     @transient private var deps: Seq[Dependency[_]]) extends Serializable with Logging {
+  
+  // 默认是OneToOneDependency
+  def this(@transient oneParent: RDD[_]) = this(oneParent.context, List(new OneToOneDependency(oneParent)))
   
   @DeveloperApi
   def compute(split: Partition, context: TaskContext): Iterator[T]
@@ -249,7 +252,6 @@ class RangeDependency[T](rdd: RDD[T], inStart: Int, outStart: Int, length: Int)
       Nil
     }
   }
-        
 }
 
 @DeveloperApi
@@ -305,7 +307,6 @@ final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
     computeOrReadCheckpoint(split, context)
   }
 }
-
 
 private[spark] def computeOrReadCheckpoint(split: Partition, context: TaskContext): Iterator[T] = {
   if (isCheckpointedAndMaterialized) {
@@ -379,6 +380,7 @@ class HadoopRDD[K, V](
          minPartitions)
   }
 	
+  // 计算逻辑，返回的是一个迭代器
   override def compute(theSplit: Partition, context: TaskContext): InterruptibleIterator[(K, V)] = {
     // 新建一个迭代器
     val iter = new NextIterator[(K, V)] {
@@ -452,11 +454,8 @@ class HadoopRDD[K, V](
   }
   
   ...
-  
 }
 ```
-
-
 
 ## 2. `org.apache.spark.rdd.MapPartitionsRDD`
 
