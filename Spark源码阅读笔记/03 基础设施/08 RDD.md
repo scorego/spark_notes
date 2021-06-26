@@ -1,4 +1,4 @@
-> RDD(Resilient Distributed Datasets，弹性分布式数据集)，是Spark中最基本的数据抽象，代表可并行操作元素的不可变分区集合。RDD的设计思想可参考论文：http://people.csail.mit.edu/matei/papers/2012/nsdi_spark.pdf
+> RDD(Resilient Distributed Datasets，弹性分布式数据集)，是Spark中最基本的数据抽象，代表可并行操作元素的不可变分区集合。RDD的设计思想可参考论文：http://people.csail.mit.edu/matei/papers/2012/nsdi_spark.pdf。RDD解决了MapReduce的缺陷：在并行计算阶段高效地进行数据共享。
 
 
 

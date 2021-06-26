@@ -6,7 +6,7 @@
 
 Spark基于netty的新rpc框架借鉴了Akka中的设计，它是基于Actor模型，各个组件可以认为是一个个独立的实体，各个实体之间通过消息来进行通信。具体各个组件之间的关系如图：
 
-![img](./pics/rpc_01_总体架构.png)
+<img src="./pics/rpc_01_总体架构.png" alt="img" style="zoom:50%;" />
 
 - `RpcEnv`
 
