@@ -10,7 +10,7 @@ Spark基于netty的新rpc框架借鉴了Akka中的设计，它是基于Actor模�
 
 - `RpcEnv`
 
-  `RpcEnv`为`RpcEndpoint`提供处理消息的环境。`RpcEnv`负责`RpcEndpoint`整个生命周期的管理，包括：注册endpoint，endpoint之间消息的路由，以及停止endpoint。
+  `RpcEnv`为`RpcEndpoint`提供处理消息的环境。`RpcEnv`定义了RPC通信框架启动、停止和关闭等抽象方法，负责`RpcEndpoint`整个生命周期的管理，包括：注册endpoint，endpoint之间消息的路由，以及停止endpoint。
 
   在driver和executor的代码中，生成`RpcEnv`的调用栈如下：
 
@@ -52,7 +52,7 @@ Spark基于netty的新rpc框架借鉴了Akka中的设计，它是基于Actor模�
 
 Rpc实现相关类之间的关系图如下:
 
-<img src="./pics/rpc_02_类图.png" alt="img" style="zoom:67%;" />
+<img src="./pics/rpc_03_类图.png" alt="img" style="zoom:67%;" />
 
 核心要点如下：
 
@@ -318,14 +318,14 @@ val rpcEnv = RpcEnv.create(systemName, bindAddress, advertiseAddress, port.getOr
 
 // RpcEnv.create()方法是：
 def create(
-    name: String,
-    bindAddress: String,
-    advertiseAddress: String,
-    port: Int,
-    conf: SparkConf,
-    securityManager: SecurityManager,
-    numUsableCores: Int,
-    clientMode: Boolean): RpcEnv = {
+      name: String,
+      bindAddress: String,
+      advertiseAddress: String,
+      port: Int,
+      conf: SparkConf,
+      securityManager: SecurityManager,
+      numUsableCores: Int,
+      clientMode: Boolean): RpcEnv = {
     val config = RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, securityManager,
                               numUsableCores, clientMode)
     new NettyRpcEnvFactory().create(config)
@@ -339,7 +339,8 @@ private[rpc] class NettyRpcEnvFactory extends RpcEnvFactory with Logging {
 
   def create(config: RpcEnvConfig): RpcEnv = {
     val sparkConf = config.conf
-    val javaSerializerInstance = new JavaSerializer(sparkConf).newInstance().asInstanceOf[JavaSerializerInstance]
+    val javaSerializerInstance = 
+    					new JavaSerializer(sparkConf).newInstance().asInstanceOf[JavaSerializerInstance]
     // 新建NettyRpcEnv实例
     val nettyEnv = new NettyRpcEnv(sparkConf, 
                                    javaSerializerInstance, 
@@ -385,7 +386,9 @@ private[netty] class NettyRpcEnv(
     numUsableCores: Int) extends RpcEnv(conf) with Logging {
 
     // "spark.executor.id"
-    val role = conf.get(EXECUTOR_ID).map { id => if (id == SparkContext.DRIVER_IDENTIFIER) "driver" else "executor" }
+    val role = conf.get(EXECUTOR_ID).map { id => 
+      	if (id == SparkContext.DRIVER_IDENTIFIER) "driver" else "executor" 
+    }
 
 	// 创建TransportConf
     private[netty] val transportConf = SparkTransportConf.fromSparkConf(
@@ -398,8 +401,9 @@ private[netty] class NettyRpcEnv(
   	private val dispatcher: Dispatcher = new Dispatcher(this, numUsableCores)
     
   	private val streamManager = new NettyStreamManager(this)
-	// 创建传输上下文
-  	private val transportContext = new TransportContext(transportConf, new NettyRpcHandler(dispatcher, this, streamManager))
+	  // 创建传输上下文
+  	private val transportContext = new TransportContext(transportConf, 
+                                                        new NettyRpcHandler(dispatcher, this, streamManager))
     
     // 创建传输客户端工厂TransportClientFactory
     private def createClientBootstraps(): java.util.List[TransportClientBootstrap] = {

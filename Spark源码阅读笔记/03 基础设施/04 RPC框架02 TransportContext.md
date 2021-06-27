@@ -1,4 +1,4 @@
-`TransportContext`内部包含传输配置信息`TransportConf`和对收到的RPC消息进行处理的`RpcHandler`，可以用来创建RPC客户端工厂类 `TransportClientFactory`和RPC服务端`TransportServer`。`TransportContext`内部握有创建`TransPortClient`和`TransPortServer`的方法实现，但却属于最底层的RPC通讯设施，这是因为其成员变量`RPCHandler`是抽象的，并没有具体的消息处理。高层封装为`NettyRPCEnv`，并持有`TransportContext`引用，在`TransportContext`中传入`NettyRpcHandler`实体，来实现Netty通讯回调Handler处理。
+`TransportContext`内部包含传输配置信息`TransportConf`和对收到的RPC消息进行处理的`RpcHandler`，可以用来创建RPC客户端工厂类 `TransportClientFactory`和RPC服务端`TransportServer`。`TransportContext`内部握有创建`TransPortClient`和`TransPortServer`的方法实现，但却属于最底层的RPC通讯设施，这是因为其成员变量`RPCHandler`是抽象的，并没有具体的消息处理。高层封装`NettyRPCEnv`持有`TransportContext`引用，在`TransportContext`中传入`NettyRpcHandler`实体，来实现Netty通讯回调Handler处理。
 
 ```java
 package org.apache.spark.network;
@@ -100,7 +100,7 @@ object SparkTransportConf {
                       module: String,
                       numUsableCores: Int = 0,
                       role: Option[String] = None): TransportConf = {
-        val conf = _conf.
+        val conf = _conf.clone
         val numThreads = NettyUtils.defaultNumThreads(numUsableCores)
         // override threads configurations with role specific values if specified
         // config order is role > module > default
@@ -129,11 +129,10 @@ object SparkTransportConf {
 
 ```java
 public TransportClientFactory createClientFactory() { 
-  return createClientFactory(new ArrayList<>()); 
+  	return createClientFactory(new ArrayList<>()); 
 }
-
 public TransportClientFactory createClientFactory(List<TransportClientBootstrap> bootstraps) {
-	return new TransportClientFactory(this, bootstraps);
+		return new TransportClientFactory(this, bootstraps);
 }
 ```
 
@@ -354,7 +353,9 @@ TransportClient createClient(InetSocketAddress address) throws IOException, Inte
     long preConnect = System.nanoTime();
     ChannelFuture cf = bootstrap.connect(address);
     if (!cf.await(conf.connectionTimeoutMs())) {
-        throw new IOException(String.format("Connecting to %s timed out (%s ms)", address, conf.connectionTimeoutMs()));
+        throw new IOException(String.format("Connecting to %s timed out (%s ms)", 
+                                            address, 
+                                            conf.connectionTimeoutMs()));
     } else if (cf.cause() != null) {
         throw new IOException(String.format("Failed to connect to %s", address), cf.cause());
     }
@@ -1071,7 +1072,9 @@ public abstract class RpcHandler {
 
     public abstract StreamManager getStreamManager();
 
-    public void receive(TransportClient client, ByteBuffer message) { receive(client, message, ONE_WAY_CALLBACK); }
+    public void receive(TransportClient client, ByteBuffer message) { 
+      	receive(client, message, ONE_WAY_CALLBACK); 
+    }
     public abstract void receive(TransportClient client, ByteBuffer message, RpcResponseCallback callback);
 
     public void channelActive(TransportClient client) { }
