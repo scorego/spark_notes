@@ -1,0 +1,105 @@
+> Spark官方对Spark SQL的定义是：一个用于处理***结构化数据***的Spark组件。自Spark 1.0版本加入后，Spark SQL一直是Spark生态系统中最活跃的组件之一。
+>
+> 结构化数据既可以来自外部结构化数据源，也可以通过向已有RDD增加Schema的方式得到。
+
+# 一、 DataFrame和DataSet
+
+> RDD API比传统的MapReduce API在易用性上有了巨大的提升，但还是存在一定的门槛。Spark SQL 1.3版本开始在原有SchemaRDD的基础上提供了与R/Pandas风格类似的DataFrame API，不仅大大降低了学习门槛，还支持Scala、Java、Python、R语言。
+
+Spark在RDD的基础上提供了`DataFrame`和`DataSet`用户编程接口，并在跨语言(Scala/Java/Python/R)方面有很好的支持。从Spark 2.0开始，`DataFrame`和`DataSet`进行了统一，可以理解为`DataFrame = Dataset[Row]`。
+
+`DataFrame`和RDD一样，也是不可变分布式弹性数据集。RDD中数据不包含任何结构性信息，而`DataFrame`中的数据集类似于关系数据库中的表，按列名存储，每一列都带有名称和类型。`DataFrame`中的数据抽象是命名元组(`Row`类型)，可以理解为`DataFrame = RDD[Row] + schema`。
+
+`DataSet`具有更强大的API，`DataFrame`与`DataSet`整合之后，`DataSet`具有两个完全不同的API特征：强类型API和弱类型API。强类型一般通过Scala中的Case Class或Java的Class来执行；弱类型即`DataFrame`，本质是一种特殊的`DataSet`（`DataSet[Row]`类型）。
+
+`DataFrame`和`Dataset`实质上都是一个逻辑计划，并且是懒加载的，包含schema信息，只有到数据要读取的时候，才会将逻辑计划进行分析和优化，并最终转化为RDD。
+
+# 二、 Spark SQL代码示例
+
+典型的Spark SQL应用场景中，数据的读取、数据表的创建和分析都是必不可少的过程。通常来讲，SQL查询所面对的数据模型以关系表为主。如下是Spark代码示例：
+
+```scala
+package com.example
+ 
+import org.apache.spark.rdd.RDD
+import org.apache.spark.{SparkConf, SparkContext}
+ 
+object WordCount {
+    
+  def main(args: Array[String]): Unit = {
+    val spark: SparkSession = SparkSession.builder()
+      .appName("SparkSessionWordCount")
+      .master("local[*]")
+      .getOrCreate()
+
+    val lines: Dataset[String] = spark.read.textFile("input/word_count.txt")
+
+    //添加隐式转换
+    import spark.implicits._
+
+    //Dataset只有一列，默认列名为value
+    val words: Dataset[String] = lines.flatMap(_.split(" "))
+
+    //注册视图
+    words.createTempView("word_table")
+
+    //执行sql（lazy）
+    val dataFrame: DataFrame = spark.sql("select value, count(*) counts from word_table group by value order by value desc")
+
+    //执行计算
+    dataFrame.show()
+  }
+}
+```
+
+结果如下：
+
+<img src="./pics/01_001_sparksql示例.png" alt="01_sparksql示例" style="zoom: 33%;" />
+
+代码中的操作可以分为3步：
+
+- 创建`SparkSession`。从2.0开始，`SparkSession`逐步取代`SparkContext`称为Spark应用程序的入口。
+- 创建数据表并读取数据。
+- 通过SQL进行数据分析。
+
+第二步创建数据表本质上也是SQL的一种，执行过程与第3步类似。
+
+# 三. Spark SQL运行原理
+
+传统关系型数据库中，最基本的SQL查询语句（如`SELECT fieldA, fieldB, fieldC FROM tableA WHERE fieldA > 10`）由`Projection(fieldA, fieldB, fieldC)`、`Data Source(tableA)`、`Filter(fieldA > 10)`三部分组成，分别对应SQL查询过程中的`Result` -> `Data Source` -> `Operation`，但实际执行过程是反过来的，按照`Operation`  -> `Data Source`  -> `Result`的顺序，具体过程如下：
+
+1. 词法和语法解析（Parse）
+
+   对读入的SQL语句进行词法和语法解析，分辨出SQL语句中的关键词、表达式、`Projection`、`Data Source`等，判断SQL语句是否规范，并形成逻辑计划。
+
+2. 绑定（Bind）
+
+   将SQL语句和数据库的数据字典（列、表和视图等）进行绑定，如果相关的`Projection`、`Data Source`等存在的话，表示这个SQL是可执行的。
+
+3. 优化（Optimize）
+
+   一般数据库会提供几个执行计划，这些计划一般都有运行统计数据，数据库会选择一个最优计划。
+
+4. 执行（Execute）
+
+   执行前面的步骤获取最优执行计划，返回从数据库中查询的数据集。
+
+Spark SQL对SQL语句的处理是类似的。Spark SQL由Core、Catalyst、Hive、Hive-Thriftserver四个部分组成：
+
+- Core
+
+  负责处理数据的输入、输出，从不同的数据源获取数据，然后将查询结果输出成Data Frame。
+
+- Catalyst
+
+  负责处理SQL，包括解析、绑定、优化、物理计划等。
+
+- Hive
+
+  负责对Hive数据的处理。
+
+- Hive-Thriftserver
+
+  提供CLI和JDBC/ODBC接口等。
+
+对于Spark SQL，从SQL到Spark的RDD的执行需要经过两大阶段，分别是逻辑计划和物理计划。
