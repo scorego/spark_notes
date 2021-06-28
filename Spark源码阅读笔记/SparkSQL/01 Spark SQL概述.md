@@ -102,4 +102,16 @@ Spark SQL对SQL语句的处理是类似的。Spark SQL由Core、Catalyst、Hive�
 
   提供CLI和JDBC/ODBC接口等。
 
-对于Spark SQL，从SQL到Spark的RDD的执行需要经过两大阶段，分别是逻辑计划和物理计划。
+对于Spark SQL，从SQL到Spark的RDD的执行需要经过两大阶段，分别是逻辑计划(Logical Plan)和物理计划(Physical Plan)。
+
+<img src="./pics/01_002_sparksql执行过程.jpeg" alt="img" style="zoom:50%;" />
+
+逻辑计划阶段会将用户的SQL语句转换成树型数据结构（逻辑算子树），逻辑算子树经历3个阶段，分别对应未解析的逻辑算子树（仅仅是数据结构，不包含任何数据信息等）、解析后的逻辑算子树（节点中绑定各种信息）和优化后的逻辑算子树（应用各种优化规则对一些低效逻辑计划进行转换）。
+
+物理计划节点将最终的逻辑算子树转换成物理算子树，物理算子树的节点直接生成RDD或RDD的transformation操作（每个物理计划节点都实现了对RDD进行转换的execute方法）。物理计划阶段包含3个阶段：
+
+1. 根据逻辑算子树生成物理算子树的列表`Iterator[PhysicalPlan]`（一对多的关系）；
+2. 从列表中按照一定的策略选择最优的物理算子树（即`SparkPlan`）；
+3. 最后对选取的物理算子树进行提交前的准备工作，如确保分区操作正确、执行代码生成等。
+
+从SQL语句的解析一直到提交前，整个转化过程都在Driver端进行。

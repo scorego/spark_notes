@@ -1,10 +1,10 @@
-> Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本，`sparkContext`是进入Spark的切入点。RDD的创建和操作得使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`sqlContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐称为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
+> Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本中，`sparkContext`是进入Spark的切入点。RDD的创建和操作需要使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`SQLContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐成为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
 
 
 
-Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的组合，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。
+spark 有三大引擎，Spark core、Spark SQL、Spark Streaming：Spark core的关键抽象是`SparkContext`、`RDD`；Spark SQL 的关键抽象是`SparkSession`、`DataFrame`；`SparkStreaming`的关键抽象是`StreamingContext`、`DStream`。Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的封装，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。`SparkSession`主要用在 SparkSQL 中，当然也可以用在其他场合。
 
-其次`SparkSession`通过工厂设计模式（factory design pattern）实现，如果没有创建`SparkSession`对象，则会实例化出一个新的`SparkSession`对象及其相关的上下文。
+`SparkSession`通过工厂设计模式（factory design pattern）实现，如果没有创建`SparkSession`对象，则会实例化出一个新的`SparkSession`对象及其相关的上下文。
 
 # 一、 SparkSession
 
