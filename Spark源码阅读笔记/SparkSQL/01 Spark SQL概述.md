@@ -8,13 +8,22 @@ Spark在RDD的基础上提供了`DataFrame`和`DataSet`用户编程接口，并�
 
 RDD是Spark计算的基石，是一个懒执行的不可变的可以支持lambda表达式的并行数据集合。RDD比较简单，但是有性能限制：它是一个 JVM 驻内存对象，这也就决定了存在 GC 的限制和Java序列化的成本。
 
-`DataFrame`和RDD一样，也是不可变分布式弹性数据集。RDD中数据不包含任何结构性信息，而`DataFrame`除数据外还记录数据的结构信息(`schema`)，其中的数据集类似于关系数据库中的表，按列名存储，每一列都带有名称和类型。`DataFrame`中的数据抽象是命名元组(`Row`类型)，可以理解为`DataFrame = RDD[Row] + schema`。
+`DataFrame`和RDD一样，也是不可变分布式弹性数据集。RDD中数据不包含任何结构性信息，而`DataFrame`除数据外还记录数据的结构信息(`schema`)，其中的数据集类似于关系数据库中的表，按列名存储，每一列都带有名称和类型。
 
 <img src="./pics/01_003_RDD_DataFrame.png" />
 
-`DataSet`具有更强大的API，`DataFrame`与`DataSet`整合之后，`DataSet`具有两个完全不同的API特征：强类型API和弱类型API。强类型一般通过Scala中的Case Class或Java的Class来执行；弱类型即`DataFrame`，本质是一种特殊的`DataSet`（`DataSet[Row]`类型）。
+上图体现了`DataFrame`和RDD的区别。左侧的`RDD[Person]`虽然以`Person`为类型参数，但 Spark 框架本身不了解`Person`类的内部结构。而右侧的 `DataFrame`却提供了详细的结构信息，使得 Spark SQL 可以清楚地知道该数据集中包含哪些列以及每列的名称和类型。RDD是分布式的`Java对象` 的集合。`DataFrame`是分布式的 `Row对象` 的集合。DataFrame 除了提供了比 RDD 更丰富的算子以外，更重要的特点是提升执行效率、减少数据读取以及执行计划的优化，比如 filter 下推、裁剪等。`DataFrame`性能比RDD性能高，主要有两方面原因：
+
+- **定制化内存管理**：数据以二进制的方式存在于`非堆内存`，节省了大量空间之外，还摆脱了 GC 的限制。
+- **优化的执行计划**：查询计划通过Catalyst optimiser进行优化。对于普通开发者而言，查询优化器的意义在于，即便是经验并不丰富的程序员写出的次优的查询，也可以被尽量转换为高效的形式予以执行。`DataFrame`的劣势在于在编译期缺少类型安全检查，有可能会运行时出错。
+
+`DataFrame`中的数据抽象是命名元组(`Row`类型)，可以理解为`type DataFrame = RDD[Row] + schema`。`DataSet`有更强大的API，既有类型安全检查也具有 `DataFrame`的查询优化特性。`DataFrame`与`DataSet`整合之后，`DataSet`具有两个完全不同的API特征：强类型API和弱类型API。强类型一般通过Scala中的Case Class或Java的Class来执行；弱类型即`DataFrame`，本质是一种特殊的`DataSet`（`DataSet[Row]`类型）。`DataSet`支持编解码器，当需要访问非堆上的数据时可以避免反序列化整个对象，提高了效率。`DataFrame`只是知道字段，但是不知道字段的类型，所以在执行这些操作的时候是没办法在编译的时候检查是否类型失败的，比如你可以对一个`String`进行减法操作，在执行的时候才报错，而`DataSet`不仅仅知道字段，而且知道字段类型，所以有更严格的错误检查。
+
+<img src="./pics/01_004_RDD_df_ds.png" />
 
 `DataFrame`和`Dataset`实质上都是一个逻辑计划，并且是懒加载的，包含schema信息，只有到数据要读取的时候，才会将逻辑计划进行分析和优化，并最终转化为RDD。
+
+<img src="./pics/01_005_comp_rdd_df_ds.png" />
 
 # 二、 Spark SQL代码示例
 
