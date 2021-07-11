@@ -1,6 +1,4 @@
-> Spark官方对Spark SQL的定义是：一个用于处理***结构化数据***的Spark组件。自Spark 1.0版本加入后，Spark SQL一直是Spark生态系统中最活跃的组件之一。
->
-> 结构化数据既可以来自外部结构化数据源，也可以通过向已有RDD增加Schema的方式得到。
+> Spark官方对Spark SQL的定义是：一个用于处理***结构化数据***的Spark组件。自1.0版本加入后，Spark SQL一直是Spark生态系统中最活跃的组件之一。
 
 # 一、 DataFrame和DataSet
 
@@ -8,7 +6,11 @@
 
 Spark在RDD的基础上提供了`DataFrame`和`DataSet`用户编程接口，并在跨语言(Scala/Java/Python/R)方面有很好的支持。从Spark 2.0开始，`DataFrame`和`DataSet`进行了统一，可以理解为`DataFrame = Dataset[Row]`。
 
-`DataFrame`和RDD一样，也是不可变分布式弹性数据集。RDD中数据不包含任何结构性信息，而`DataFrame`中的数据集类似于关系数据库中的表，按列名存储，每一列都带有名称和类型。`DataFrame`中的数据抽象是命名元组(`Row`类型)，可以理解为`DataFrame = RDD[Row] + schema`。
+RDD是Spark计算的基石，是一个懒执行的不可变的可以支持lambda表达式的并行数据集合。RDD比较简单，但是有性能限制：它是一个 JVM 驻内存对象，这也就决定了存在 GC 的限制和Java序列化的成本。
+
+`DataFrame`和RDD一样，也是不可变分布式弹性数据集。RDD中数据不包含任何结构性信息，而`DataFrame`除数据外还记录数据的结构信息(`schema`)，其中的数据集类似于关系数据库中的表，按列名存储，每一列都带有名称和类型。`DataFrame`中的数据抽象是命名元组(`Row`类型)，可以理解为`DataFrame = RDD[Row] + schema`。
+
+<img src="./pics/01_003_RDD_DataFrame.png" />
 
 `DataSet`具有更强大的API，`DataFrame`与`DataSet`整合之后，`DataSet`具有两个完全不同的API特征：强类型API和弱类型API。强类型一般通过Scala中的Case Class或Java的Class来执行；弱类型即`DataFrame`，本质是一种特殊的`DataSet`（`DataSet[Row]`类型）。
 
@@ -16,7 +18,7 @@ Spark在RDD的基础上提供了`DataFrame`和`DataSet`用户编程接口，并�
 
 # 二、 Spark SQL代码示例
 
-典型的Spark SQL应用场景中，数据的读取、数据表的创建和分析都是必不可少的过程。通常来讲，SQL查询所面对的数据模型以关系表为主。如下是Spark代码示例：
+典型的Spark SQL应用场景中，数据的读取、数据表的创建和分析都是必不可少的过程。通常来讲，SQL查询所面对的数据模型以关系表为主。如下是代码示例：
 
 ```scala
 package com.example
@@ -58,13 +60,13 @@ object WordCount {
 
 代码中的操作可以分为3步：
 
-- 创建`SparkSession`。从2.0开始，`SparkSession`逐步取代`SparkContext`称为Spark应用程序的入口。
+- 创建`SparkSession`。从2.0开始，`SparkSession`逐步取代`SparkContext`成为Spark应用程序的入口。
 - 创建数据表并读取数据。
 - 通过SQL进行数据分析。
 
 第二步创建数据表本质上也是SQL的一种，执行过程与第3步类似。
 
-# 三. Spark SQL运行原理
+# 三、 Spark SQL运行原理
 
 传统关系型数据库中，最基本的SQL查询语句（如`SELECT fieldA, fieldB, fieldC FROM tableA WHERE fieldA > 10`）由`Projection(fieldA, fieldB, fieldC)`、`Data Source(tableA)`、`Filter(fieldA > 10)`三部分组成，分别对应SQL查询过程中的`Result` -> `Data Source` -> `Operation`，但实际执行过程是反过来的，按照`Operation`  -> `Data Source`  -> `Result`的顺序，具体过程如下：
 
@@ -115,3 +117,5 @@ Spark SQL对SQL语句的处理是类似的。Spark SQL由Core、Catalyst、Hive�
 3. 最后对选取的物理算子树进行提交前的准备工作，如确保分区操作正确、执行代码生成等。
 
 从SQL语句的解析一直到提交前，整个转化过程都在Driver端进行。
+
+# 

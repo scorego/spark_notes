@@ -1,8 +1,8 @@
-> Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本中，`sparkContext`是进入Spark的切入点。RDD的创建和操作需要使用`sparkContex`t提供的API；对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`SQLContext`；而对于hive得使用`HiveContext`。然而DataSet和Dataframe提供的API逐渐成为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
+> Spark 1.X实际上有两个Context， `SparkContext`和`SQLContext`，它们负责不同的功能。 前者专注于对Spark的中心抽象进行更细粒度的控制，而后者则专注于Spark SQL等更高级别的API。Spark的早期版本中，`SparkContext`是进入Spark的切入点，RDD的创建和操作需要使用`SparkContex`t提供的API。对于RDD之外的其他东西，我们需要使用其他的Context。比如对于流处理来说，我们得使用`StreamingContext`；对于SQL得使用`SQLContext`；而对于hive得使用`HiveContext`。然而`DataSet`和`Dataframe`提供的API逐渐成为新的标准API，需要一个切入点(entry point)来构建它们，所以Spark 2.0引入了一个新的切入点——`SparkSession`。
 
 
 
-spark 有三大引擎，Spark core、Spark SQL、Spark Streaming：Spark core的关键抽象是`SparkContext`、`RDD`；Spark SQL 的关键抽象是`SparkSession`、`DataFrame`；`SparkStreaming`的关键抽象是`StreamingContext`、`DStream`。Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的封装，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。`SparkSession`主要用在 SparkSQL 中，当然也可以用在其他场合。
+Spark 有三大引擎，Spark core、Spark SQL、Spark Streaming：Spark core的关键抽象是`SparkContext`、`RDD`；Spark SQL 的关键抽象是`SparkSession`、`DataFrame`、`DataSet`；`SparkStreaming`的关键抽象是`StreamingContext`、`DStream`。Spark 2.0引入了`SparkSession`，为用户提供了一个统一的入口来使用Spark的各项功能，实质上是`SQLContext`和`HiveContext`的封装，所以在`SQLContext`和`HiveContext`上可用的API在`SparkSession`上同样是可以使用的。另外`SparkSession`允许用户通过它调用DataFrame和Dataset相关API来编写Spark程序。`SparkSession`主要用在 Spark SQL 中，当然也可以用在其他场合。
 
 `SparkSession`通过工厂设计模式（factory design pattern）实现，如果没有创建`SparkSession`对象，则会实例化出一个新的`SparkSession`对象及其相关的上下文。
 
@@ -37,7 +37,17 @@ object SparkSession extends Logging{...}
 
 `SparkSession`有以下重要属性：
 
-实例属性：
+静态变量：
+
+```scala
+// 持有当前线程激活的SparkSession
+private val activeThreadSession = new InheritableThreadLocal[SparkSession]
+
+// 持有默认的SparkSession
+private val defaultSession = new AtomicReference[SparkSession]
+```
+
+实例变量：
 
 ```scala
 // 在多个SparkSession之间共享的状态，包括SparkContext、缓存的数据、监听器(listener)、与外部系统交互的catalog
@@ -66,16 +76,6 @@ val sqlContext: SQLContext = new SQLContext(this)
 lazy val conf: RuntimeConfig = new RuntimeConfig(sessionState.conf)
 
 lazy val catalog: Catalog = new CatalogImpl(self)
-```
-
-伴生对象的属性：
-
-```scala
-// 持有当前线程激活的SparkSession
-private val activeThreadSession = new InheritableThreadLocal[SparkSession]
-
-// 持有默认的SparkSession
-private val defaultSession = new AtomicReference[SparkSession]
 ```
 
 
@@ -328,7 +328,7 @@ def getOrCreate(): SparkSession = synchronized {
 9. 调用该`SparkContext`的`addSparkListener()`方法，向`listenerBus`中添加匿名实现的`SparkListener`（此`SparkListener`的作用是在Application结束后清空`defaultSession`和`listenerRegistered`）。
 10. 返回创建或获取的`SparkSession`。
 
-# 二、 SparkContext
+## 2. `SparkContext`
 
 `SparkSession.builder().getOrCreate()`方法在创建完`SparkConf`后，如果是第一次创建`SparkSession`，会使用`SparkContext.getOrCreate(sparkConf)`来创建`SparkContext`实例。
 
