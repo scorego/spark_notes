@@ -25,47 +25,91 @@ RDD是Spark计算的基石，是一个懒执行的不可变的可以支持lambda
 
 <img src="./pics/01_005_comp_rdd_df_ds.png" />
 
+RDD、`DataFrame`、`Dataset`三者有许多共性，有各自适用的场景常常需要在三者之间转换:
+
+- RDD -> `DataFrame` 
+
+   ````scala
+   rdd.map(_.split(" ")).map(para => (para(0).trim(), para(1).trim().toInt)).toDF("name", "age")
+   ````
+
+- RDD -> `DataSet` 
+
+  ```scala
+  case class Person(name:String, age: Int)
+  rdd.map(_.split(" ")).map(para => Person(para(0).trim(), para(1).trim().toInt)).toDS
+  ```
+
+- `DataFrame` -> RDD 
+
+  `df.rdd`
+
+- `DataSet` -> RDD 
+
+   `ds.rdd`
+
+- `DataFrame` -> `DataSet` 
+
+   `df.as[Person]`
+
+- `DataSet` -> `DataFrame` 
+
+   `ds.toDF`
+
 # 二、 Spark SQL代码示例
 
-典型的Spark SQL应用场景中，数据的读取、数据表的创建和分析都是必不可少的过程。通常来讲，SQL查询所面对的数据模型以关系表为主。如下是代码示例：
+典型的Spark SQL应用场景中，数据的读取、数据表的创建和分析都是必不可少的过程。通常来讲，SQL查询所面对的数据模型以关系表为主。如下是代码示例。
+
+Maven依赖：
+
+```
+<dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.version}</artifactId>
+            <version>${spark.version}</version>
+            <!-- provided 表示编译期可用，运行期不可用 -->
+            <!--<scope>provided</scope>-->
+</dependency>
+```
+
+主代码：
 
 ```scala
 package com.example
- 
-import org.apache.spark.rdd.RDD
-import org.apache.spark.{SparkConf, SparkContext}
- 
-object WordCount {
-    
+
+import org.apache.spark.sql.SparkSession
+
+object DfTest {
+
   def main(args: Array[String]): Unit = {
     val spark: SparkSession = SparkSession.builder()
       .appName("SparkSessionWordCount")
       .master("local[*]")
       .getOrCreate()
 
-    val lines: Dataset[String] = spark.read.textFile("input/word_count.txt")
-
     //添加隐式转换
     import spark.implicits._
 
-    //Dataset只有一列，默认列名为value
-    val words: Dataset[String] = lines.flatMap(_.split(" "))
+    // 通过 spark.read 操作读取 JSON 数据
+    val df = spark.read.json("input/people.json")
 
-    //注册视图
-    words.createTempView("word_table")
+    df.show()
 
-    //执行sql（lazy）
-    val dataFrame: DataFrame = spark.sql("select value, count(*) counts from word_table group by value order by value desc")
+    df.filter($"age" > 21).show()
 
-    //执行计算
-    dataFrame.show()
+    // 将DF注册为表
+    df.createOrReplaceTempView("persons")
+
+    spark.sql("select * from persons where age > 21").show()
+
+    spark.stop()
   }
 }
 ```
 
 结果如下：
 
-<img src="./pics/01_001_sparksql示例.png" alt="01_sparksql示例" style="zoom: 33%;" />
+<img src="./pics/01_001_sparksql示例.png" alt="01_sparksql示例" style="zoom: 67%;" />
 
 代码中的操作可以分为3步：
 
